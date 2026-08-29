@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <meta
+    name="description"
+    content="KaamSetu - Find trusted local workers near you"
+  >
+
+  <title>KaamSetu - Local Worker Marketplace</title>
+
+  <link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+
+  <header class="topbar">
+
+    <div class="brand">
+      <span class="brand-main">Kaam</span><span class="brand-accent">Setu</span>
+    </div>
+
+    <div id="session"></div>
+
+  </header>
+
+
+  <main class="container">
+
+    <!-- HERO -->
+
+    <section class="hero">
+
+      <div class="hero-content">
+
+        <span class="eyebrow">
+          TRUSTED LOCAL WORKER MARKETPLACE
+        </span>
+
+        <h1>
+          Find the right worker,
+          <span>near you.</span>
+        </h1>
+
+        <p>
+          Book plumbers, electricians, carpenters,
+          cleaners and many more professionals for
+          small jobs or full-day work.
+        </p>
+
+        <div class="hero-actions">
+
+          <button
+            class="primary-btn"
+            onclick="showAuth()"
+          >
+            Get Started
+          </button>
+
+          <button
+            class="secondary-btn"
+            onclick="locate()"
+          >
+            📍 Find Nearby Workers
+          </button>
+
+        </div>
+
+      </div>
+
+
+      <div class="hero-card">
+
+        <div class="hero-icon">
+          🛠️
+        </div>
+
+        <h3>
+          Local help. Simple booking.
+        </h3>
+
+        <div class="feature">
+          <span>📍</span>
+          <div>
+            <b>GPS Nearby Search</b>
+            <small>Find workers around your location</small>
+          </div>
+        </div>
+
+        <div class="feature">
+          <span>✓</span>
+          <div>
+            <b>Verified Professionals</b>
+            <small>Admin-approved worker profiles</small>
+          </div>
+        </div>
+
+        <div class="feature">
+          <span>⚡</span>
+          <div>
+            <b>Quick Requests</b>
+            <small>Send a job request in seconds</small>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- AUTH / APP AREA -->
+
+    <section id="app"></section>
+
+
+    <!-- SERVICES -->
+
+    <section class="services-section">
+
+      <div class="section-heading">
+
+        <span class="eyebrow">
+          POPULAR SERVICES
+        </span>
+
+        <h2>
+          What do you need help with?
+        </h2>
+
+        <p>
+          Choose a category and discover available
+          professionals near you.
+        </p>
+
+      </div>
+
+
+      <div class="service-grid">
+
+        <button
+          class="service-card"
+          onclick="selectService('Plumber')"
+        >
+          <span>🔧</span>
+          <b>Plumber</b>
+          <small>Pipe & water work</small>
+        </button>
+
+
+        <button
+          class="service-card"
+          onclick="selectService('Electrician')"
+        >
+          <span>⚡</span>
+          <b>Electrician</b>
+          <small>Electrical repairs</small>
+        </button>
+
+
+        <button
+          class="service-card"
+          onclick="selectService('Carpenter')"
+        >
+          <span>🪚</span>
+          <b>Carpenter</b>
+          <small>Furniture & wood work</small>
+        </button>
+
+
+        <button
+          class="service-card"
+          onclick="selectService('Painter')"
+        >
+          <span>🎨</span>
+          <b>Painter</b>
+          <small>Home & wall painting</small>
+        </button>
+
+
+        <button
+          class="service-card"
+          onclick="selectService('Cleaner')"
+        >
+          <span>🧹</span>
+          <b>Cleaner</b>
+          <small>Home & office cleaning</small>
+        </button>
+
+
+        <button
+          class="service-card"
+          onclick="selectService('AC Technician')"
+        >
+          <span>❄️</span>
+          <b>AC Technician</b>
+          <small>AC service & repair</small>
+        </button>
+
+
+        <button
+          class="service-card"
+          onclick="selectService('Mechanic')"
+        >
+          <span>🔩</span>
+          <b>Mechanic</b>
+          <small>Vehicle repairs</small>
+        </button>
+
+
+        <button
+          class="service-card"
+          onclick="selectService('General Labour')"
+        >
+          <span>👷</span>
+          <b>General Labour</b>
+          <small>Daily & small jobs</small>
+        </button>
+
+      </div>
+
+    </section>
+
+
+    <!-- HOW IT WORKS -->
+
+    <section class="how-section">
+
+      <div class="section-heading">
+
+        <span class="eyebrow">
+          HOW IT WORKS
+        </span>
+
+        <h2>
+          Get your work done in 3 simple steps
+        </h2>
+
+      </div>
+
+
+      <div class="steps">
+
+        <div class="step">
+
+          <div class="step-number">
+            01
+          </div>
+
+          <h3>
+            Choose a service
+          </h3>
+
+          <p>
+            Select the type of worker you need.
+          </p>
+
+        </div>
+
+
+        <div class="step">
+
+          <div class="step-number">
+            02
+          </div>
+
+          <h3>
+            Find nearby workers
+          </h3>
+
+          <p>
+            Use GPS to discover available
+            professionals near you.
+          </p>
+
+        </div>
+
+
+        <div class="step">
+
+          <div class="step-number">
+            03
+          </div>
+
+          <h3>
+            Send a request
+          </h3>
+
+          <p>
+            Describe the work and send your
+            booking request.
+          </p>
+
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- FOOTER -->
+
+    <footer>
+
+      <div>
+        <b>Kaam<span>Setu</span></b>
+        <p>
+          Connecting customers with local
+          service professionals.
+        </p>
+      </div>
+
+      <div class="footer-links">
+        <a href="/">Home</a>
+        <a href="/admin.html">Admin</a>
+      </div>
+
+    </footer>
+
+  </main>
+
+
+  <script src="/app.js"></script>
+
+</body>
+          </html>
