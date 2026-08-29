@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>KaamSetu Admin</title>
+
+  <link rel="stylesheet" href="/style.css">
+
+  <style>
+    body {
+      background: #f5f7fb;
+    }
+
+    .admin-shell {
+      width: min(1250px, 94%);
+      margin: auto;
+      padding: 30px 0 60px;
+    }
+
+    .admin-header {
+      background: #ffffff;
+      border: 1px solid #e5e9f0;
+      border-radius: 20px;
+      padding: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 25px;
+    }
+
+    .admin-brand {
+      font-size: 25px;
+      font-weight: 850;
+    }
+
+    .admin-brand span {
+      color: #1769e0;
+    }
+
+    .admin-subtitle {
+      color: #687386;
+      margin-top: 5px;
+      font-size: 14px;
+    }
+
+    .admin-login,
+    .admin-content {
+      background: #ffffff;
+      border: 1px solid #e5e9f0;
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 12px 35px rgba(23,32,51,.07);
+    }
+
+    .admin-login {
+      max-width: 500px;
+      margin: 80px auto;
+    }
+
+    .admin-login h1 {
+      margin-bottom: 8px;
+    }
+
+    .admin-login p {
+      color: #687386;
+      margin-bottom: 25px;
+    }
+
+    .admin-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+
+    .stat-card {
+      background: #ffffff;
+      border: 1px solid #e5e9f0;
+      border-radius: 16px;
+      padding: 22px;
+    }
+
+    .stat-card small {
+      color: #687386;
+      display: block;
+      margin-bottom: 10px;
+    }
+
+    .stat-card strong {
+      font-size: 30px;
+    }
+
+    .admin-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 25px;
+    }
+
+    .admin-tab {
+      border: 1px solid #e5e9f0;
+      background: #ffffff;
+      padding: 10px 15px;
+      border-radius: 10px;
+      font-weight: 750;
+    }
+
+    .admin-tab.active {
+      background: #1769e0;
+      color: #ffffff;
+      border-color: #1769e0;
+    }
+
+    .admin-table-wrap {
+      overflow-x: auto;
+    }
+
+    .admin-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 750px;
+    }
+
+    .admin-table th,
+    .admin-table td {
+      text-align: left;
+      padding: 15px 12px;
+      border-bottom: 1px solid #e5e9f0;
+    }
+
+    .admin-table th {
+      font-size: 12px;
+      color: #687386;
+      text-transform: uppercase;
+      letter-spacing: .7px;
+    }
+
+    .admin-table td {
+      font-size: 14px;
+    }
+
+    .approve-btn {
+      border: 0;
+      background: #15803d;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-weight: 700;
+    }
+
+    .reject-btn {
+      border: 0;
+      background: #b91c1c;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-weight: 700;
+      margin-left: 5px;
+    }
+
+    .admin-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .logout-admin {
+      border: 1px solid #e5e9f0;
+      background: white;
+      padding: 9px 14px;
+      border-radius: 9px;
+      font-weight: 700;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .security-note {
+      margin-top: 15px;
+      padding: 12px;
+      background: #f8fafc;
+      border-radius: 10px;
+      color: #687386;
+      font-size: 13px;
+    }
+
+    @media (max-width: 850px) {
+      .admin-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 600px) {
+      .admin-shell {
+        width: 92%;
+      }
+
+      .admin-header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .admin-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .admin-content,
+      .admin-login {
+        padding: 20px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="admin-shell">
+
+    <!-- ADMIN HEADER -->
+
+    <header class="admin-header">
+
+      <div>
+        <div class="admin-brand">
+          Kaam<span>Setu</span> Admin
+        </div>
+
+        <div class="admin-subtitle">
+          Secure management dashboard
+        </div>
+      </div>
+
+      <div
+        id="admin-actions"
+        class="admin-actions hidden"
+      >
+
+        <button
+          class="logout-admin"
+          onclick="adminLogout()"
+        >
+          Logout
+        </button>
+
+      </div>
+
+    </header>
+
+
+    <!-- ADMIN LOGIN -->
+
+    <section
+      id="admin-login"
+      class="admin-login"
+    >
+
+      <span class="eyebrow">
+        RESTRICTED ACCESS
+      </span>
+
+      <h1>
+        Admin Login
+      </h1>
+
+      <p>
+        This area is restricted to authorised
+        KaamSetu administrators.
+      </p>
+
+      <input
+        id="admin-key"
+        type="password"
+        placeholder="Enter admin key"
+        autocomplete="off"
+      >
+
+      <button
+        class="primary-btn full-btn"
+        onclick="adminLogin()"
+      >
+        Secure Login
+      </button>
+
+      <div class="security-note">
+        🔒 Customers and workers cannot access
+        administrative data.
+      </div>
+
+    </section>
+
+
+    <!-- ADMIN CONTENT -->
+
+    <section
+      id="admin-content"
+      class="hidden"
+    >
+
+      <div class="admin-grid">
+
+        <div class="stat-card">
+          <small>Total Users</small>
+          <strong id="stat-users">—</strong>
+        </div>
+
+        <div class="stat-card">
+          <small>Total Workers</small>
+          <strong id="stat-workers">—</strong>
+        </div>
+
+        <div class="stat-card">
+          <small>Total Bookings</small>
+          <strong id="stat-bookings">—</strong>
+        </div>
+
+        <div class="stat-card">
+          <small>Pending Workers</small>
+          <strong id="stat-pending">—</strong>
+        </div>
+
+      </div>
+
+
+      <div class="admin-content">
+
+        <div class="admin-tabs">
+
+          <button
+            id="tab-workers"
+            class="admin-tab active"
+            onclick="showWorkers()"
+          >
+            👷 Worker Verification
+          </button>
+
+          <button
+            id="tab-bookings"
+            class="admin-tab"
+            onclick="showBookings()"
+          >
+            📋 Bookings
+          </button>
+
+        </div>
+
+
+        <div id="admin-panel">
+
+          Loading dashboard...
+
+        </div>
+
+      </div>
+
+    </section>
+
+  </div>
+
+
+  <script>
+
+    let adminKey =
+      sessionStorage.getItem(
+        "ks_admin_key"
+      ) || "";
+
+
+    async function adminAPI(
+      url,
+      options = {}
+    ) {
+
+      options.headers = {
+        ...(options.headers || {}),
+        "x-admin-key": adminKey
+      };
+
+      const response =
+        await fetch(url, options);
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+          "Admin request failed"
+        );
+      }
+
+      return data;
+    }
+
+
+    async function adminLogin() {
+
+      const key =
+        document
+          .getElementById("admin-key")
+          .value
+          .trim();
+
+      if (!key) {
+        alert("Enter the admin key.");
+        return;
+      }
+
+      adminKey = key;
+
+      try {
+
+        await adminAPI(
+          "/api/admin/stats"
+        );
+
+        sessionStorage.setItem(
+          "ks_admin_key",
+          adminKey
+        );
+
+        document
+          .getElementById("admin-login")
+          .classList.add("hidden");
+
+        document
+          .getElementById("admin-content")
+          .classList.remove("hidden");
+
+        document
+          .getElementById("admin-actions")
+          .classList.remove("hidden");
+
+        loadStats();
+
+        showWorkers();
+
+      } catch (error) {
+
+        adminKey = "";
+
+        alert(
+          "Access denied. Check the admin key."
+        );
+
+      }
+
+    }
+
+
+    async function loadStats() {
+
+      try {
+
+        const stats =
+          await adminAPI(
+            "/api/admin/stats"
+          );
+
+        document
+          .getElementById("stat-users")
+          .textContent =
+          stats.users;
+
+        document
+          .getElementById("stat-workers")
+          .textContent =
+          stats.workers;
+
+        document
+          .getElementById("stat-bookings")
+          .textContent =
+          stats.bookings;
+
+        document
+          .getElementById("stat-pending")
+          .textContent =
+          stats.pending_workers;
+
+      } catch (error) {
+
+        console.error(error);
+
+      }
+
+    }
+
+
+    async function showWorkers() {
+
+      setActiveTab("tab-workers");
+
+      const panel =
+        document.getElementById(
+          "admin-panel"
+        );
+
+      panel.innerHTML =
+        "Loading workers...";
+
+      try {
+
+        const workers =
+          await adminAPI(
+            "/api/admin/workers"
+          );
+
+        if (!workers.length) {
+
+          panel.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-icon">👷</div>
+              <h3>No worker applications</h3>
+              <p>
+                New worker registrations
+                will appear here.
+              </p>
+            </div>
+          `;
+
+          return;
+        }
+
+
+        panel.innerHTML = `
+
+          <div class="admin-table-wrap">
+
+            <table class="admin-table">
+
+              <thead>
+
+                <tr>
+                  <th>Worker</th>
+                  <th>Category</th>
+                  <th>Experience</th>
+                  <th>Rating</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+
+              </thead>
+
+              <tbody>
+
+                ${workers.map(
+                  worker => `
+
+                    <tr>
+
+                      <td>
+                        <strong>
+                          ${escapeHTML(
+                            worker.name ||
+                            "Unnamed"
+                          )}
+                        </strong>
+
+                        <br>
+
+                        <small>
+                          ${escapeHTML(
+                            worker.phone ||
+                            ""
+                          )}
+                        </small>
+                      </td>
+
+                      <td>
+                        ${escapeHTML(
+                          worker.category ||
+                          "-"
+                        )}
+                      </td>
+
+                      <td>
+                        ${
+                          worker.experience ||
+                          0
+                        } years
+                      </td>
+
+                      <td>
+                        ⭐
+                        ${
+                          worker.rating ||
+                          5
+                        }
+                      </td>
+
+                      <td>
+                        ${
+                          worker.approved
+                            ? "✓ Approved"
+                            : "Pending"
+                        }
+                      </td>
+
+                      <td>
+
+                        ${
+                          worker.approved
+                            ? `
+                              <button
+                                class="reject-btn"
+                                onclick="
+                                  updateWorker(
+                                    ${worker.id},
+                                    false
+                                  )
+                                "
+                              >
+                                Disable
+                              </button>
+                            `
+                            : `
+                              <button
+                                class="approve-btn"
+                                onclick="
+                                  updateWorker(
+                                    ${worker.id},
+                                    true
+                                  )
+                                "
+                              >
+                                Approve
+                              </button>
+                            `
+                        }
+
+                      </td>
+
+                    </tr>
+
+                  `
+                ).join("")}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        `;
+
+      } catch (error) {
+
+        panel.innerHTML = `
+          <div class="error-state">
+            ${escapeHTML(
+              error.message
+            )}
+          </div>
+        `;
+
+      }
+
+    }
+
+
+    async function updateWorker(
+      workerId,
+      approved
+    ) {
+
+      try {
+
+        await adminAPI(
+          "/api/admin/workers/" +
+          workerId,
+          {
+            method: "PATCH",
+
+            headers: {
+              "Content-Type":
+                "application/json"
+            },
+
+            body: JSON.stringify({
+              approved
+            })
+          }
+        );
+
+        await loadStats();
+
+        await showWorkers();
+
+      } catch (error) {
+
+        alert(error.message);
+
+      }
+
+    }
+
+
+    async function showBookings() {
+
+      setActiveTab("tab-bookings");
+
+      const panel =
+        document.getElementById(
+          "admin-panel"
+        );
+
+      panel.innerHTML =
+        "Loading bookings...";
+
+      try {
+
+        const bookings =
+          await adminAPI(
+            "/api/admin/bookings"
+          );
+
+        if (!bookings.length) {
+
+          panel.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-icon">📋</div>
+              <h3>No bookings yet</h3>
+              <p>
+                Customer bookings will
+                appear here.
+              </p>
+            </div>
+          `;
+
+          return;
+        }
+
+
+        panel.innerHTML = `
+
+          <div class="admin-table-wrap">
+
+            <table class="admin-table">
+
+              <thead>
+
+                <tr>
+                  <th>ID</th>
+                  <th>Customer</th>
+                  <th>Worker</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th>Price</th>
+                </tr>
+
+              </thead>
+
+              <tbody>
+
+                ${bookings.map(
+                  booking => `
+
+                    <tr>
+
+                      <td>
+                        #${booking.id}
+                      </td>
+
+                      <td>
+                        ${escapeHTML(
+                          booking.customer_phone ||
+                          "-"
+                        )}
+                      </td>
+
+                      <td>
+                        ${escapeHTML(
+                          booking.worker_name ||
+                          "-"
+                        )}
+                      </td>
+
+                      <td>
+                        ${escapeHTML(
+                          booking.category ||
+                          "-"
+                        )}
+                      </td>
+
+                      <td>
+                        ${escapeHTML(
+                          formatStatus(
+                            booking.status
+                          )
+                        )}
+                      </td>
+
+                      <td>
+                        ₹${
+                          booking.estimated_price ||
+                          0
+                        }
+                      </td>
+
+                    </tr>
+
+                  `
+                ).join("")}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        `;
+
+      } catch (error) {
+
+        panel.innerHTML = `
+          <div class="error-state">
+            ${escapeHTML(
+              error.message
+            )}
+          </div>
+        `;
+
+      }
+
+    }
+
+
+    function setActiveTab(id) {
+
+      document
+        .querySelectorAll(".admin-tab")
+        .forEach(
+          button =>
+            button.classList.remove(
+              "active"
+            )
+        );
+
+      document
+        .getElementById(id)
+        .classList.add("active");
+
+    }
+
+
+    function adminLogout() {
+
+      sessionStorage.removeItem(
+        "ks_admin_key"
+      );
+
+      adminKey = "";
+
+      location.reload();
+
+    }
+
+
+    function formatStatus(status) {
+
+      return String(status || "")
+        .replaceAll("_", " ")
+        .replace(
+          /\b\w/g,
+          letter =>
+            letter.toUpperCase()
+        );
+
+    }
+
+
+    function escapeHTML(value) {
+
+      return String(value ?? "")
+        .replaceAll(
+          "&",
+          "&amp;"
+        )
+        .replaceAll(
+          "<",
+          "&lt;"
+        )
+        .replaceAll(
+          ">",
+          "&gt;"
+        )
+        .replaceAll(
+          '"',
+          "&quot;"
+        )
+        .replaceAll(
+          "'",
+          "&#039;"
+        );
+
+    }
+
+
+    /* Existing admin session */
+
+    if (adminKey) {
+
+      adminAPI(
+        "/api/admin/stats"
+      )
+      .then(() => {
+
+        document
+          .getElementById(
+            "admin-login"
+          )
+          .classList.add(
+            "hidden"
+          );
+
+        document
+          .getElementById(
+            "admin-content"
+          )
+          .classList.remove(
+            "hidden"
+          );
+
+        document
+          .getElementById(
+            "admin-actions"
+          )
+          .classList.remove(
+            "hidden"
+          );
+
+        loadStats();
+
+        showWorkers();
+
+      })
+      .catch(() => {
+
+        sessionStorage.removeItem(
+          "ks_admin_key"
+        );
+
+        adminKey = "";
+
+      });
+
+    }
+
+  </script>
+
+</body>
+</html>
