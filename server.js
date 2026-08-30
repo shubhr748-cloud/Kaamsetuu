@@ -568,7 +568,7 @@ app.post(
           )
 
           VALUES (?, 1)
-        `).run(phone, 1);
+        `).run(phone);
 
 
       user =
