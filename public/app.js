@@ -1,44 +1,100 @@
-let user = JSON.parse(
-  localStorage.getItem("ks_user") || "null"
-);
+// ============================================================
+// KAAMSETU - FINAL FRONTEND APP
+// Matches the current server.js API
+// ============================================================
 
-let category = "Plumber";
+"use strict";
 
-let latitude = null;
-let longitude = null;
+const API_BASE = "/api";
 
-const categories = [
-  "Plumber",
-  "Electrician",
-  "Carpenter",
-  "Painter",
-  "Cleaner",
-  "AC Technician",
-  "Mechanic",
-  "Mason",
-  "Gardener",
-  "Driver",
-  "Welder",
-  "General Labour",
-  "Appliance Repair",
-  "CCTV Technician"
-];
+const state = {
+  user: null,
+  selectedService: "",
+  customerLocation: null,
+  nearbyWorkers: [],
+  selectedWorker: null,
+  currentBookings: [],
+  notifications: [],
+  otpPhone: "",
+  pendingBooking: null
+};
 
 
-// =====================================================
-// API HELPER
-// =====================================================
+// ============================================================
+// DOM HELPERS
+// ============================================================
 
-async function api(url, options = {}) {
+function getApp() {
+  return document.getElementById("app");
+}
 
-  options.headers = {
-    ...(options.headers || {}),
-    ...(user ? {
-      "x-user-id": String(user.id)
-    } : {})
+function escapeHTML(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function money(value) {
+  const amount = Number(value || 0);
+
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2
+  }).format(amount);
+}
+
+function showMessage(message, type = "info") {
+  const old = document.getElementById("ks-message");
+
+  if (old) {
+    old.remove();
+  }
+
+  const box = document.createElement("div");
+
+  box.id = "ks-message";
+  box.textContent = message;
+  box.className = `ks-message ks-${type}`;
+
+  document.body.appendChild(box);
+
+  setTimeout(() => {
+    box.remove();
+  }, 4500);
+}
+
+
+// ============================================================
+// API REQUEST HELPER
+// ============================================================
+
+async function apiRequest(
+  endpoint,
+  options = {}
+) {
+  const headers = {
+    ...(options.headers || {})
   };
 
-  const response = await fetch(url, options);
+  if (options.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  if (state.user?.id) {
+    headers["x-user-id"] = String(state.user.id);
+  }
+
+  const response = await fetch(
+    `${API_BASE}${endpoint}`,
+    {
+      ...options,
+      headers
+    }
+  );
 
   let data = {};
 
@@ -49,238 +105,441 @@ async function api(url, options = {}) {
   }
 
   if (!response.ok) {
-
     throw new Error(
-      data.error || "Something went wrong"
+      data.error ||
+      `Request failed (${response.status})`
     );
-
   }
 
   return data;
 }
 
 
-// =====================================================
-// AUTH SCREEN
-// =====================================================
+// ============================================================
+// LOCAL SESSION
+// ============================================================
+
+function saveSession() {
+  if (!state.user) {
+    localStorage.removeItem("kaamsetu_user");
+    return;
+  }
+
+  localStorage.setItem(
+    "kaamsetu_user",
+    JSON.stringify(state.user)
+  );
+}
+
+function loadSession() {
+  try {
+    const raw =
+      localStorage.getItem("kaamsetu_user");
+
+    if (!raw) {
+      return;
+    }
+
+    const user = JSON.parse(raw);
+
+    if (
+      user &&
+      Number.isInteger(Number(user.id))
+    ) {
+      state.user = user;
+    }
+  } catch {
+    localStorage.removeItem("kaamsetu_user");
+  }
+}
+
+function logout() {
+  state.user = null;
+  state.selectedWorker = null;
+  state.nearbyWorkers = [];
+
+  localStorage.removeItem(
+    "kaamsetu_user"
+  );
+
+  updateSessionUI();
+  renderApp();
+
+  showMessage(
+    "You have been logged out.",
+    "success"
+  );
+}
+
+
+// ============================================================
+// SESSION UI
+// ============================================================
+
+function updateSessionUI() {
+  const session =
+    document.getElementById("session");
+
+  if (!session) {
+    return;
+  }
+
+  if (!state.user) {
+    session.innerHTML = `
+      <button
+        class="secondary-btn"
+        onclick="showAuth()"
+      >
+        Login
+      </button>
+    `;
+
+    return;
+  }
+
+  const role =
+    state.user.role
+      ? escapeHTML(state.user.role)
+      : "Account";
+
+  const phone =
+    escapeHTML(state.user.phone || "");
+
+  session.innerHTML = `
+    <div class="session-user">
+      <span>
+        ${phone}
+      </span>
+
+      <small>
+        ${role}
+      </small>
+
+      <button
+        class="secondary-btn"
+        onclick="logout()"
+      >
+        Logout
+      </button>
+    </div>
+  `;
+}
+
+
+// ============================================================
+// AUTH MODAL
+// ============================================================
 
 function showAuth() {
+  if (state.user) {
+    renderApp();
 
-  document.getElementById("app").innerHTML = `
+    document
+      .getElementById("app")
+      ?.scrollIntoView({
+        behavior: "smooth"
+      });
 
-    <section class="panel auth-panel">
+    return;
+  }
+
+  getApp().innerHTML = `
+    <section class="auth-card">
 
       <div class="section-heading">
-
         <span class="eyebrow">
-          GET STARTED
+          KAAMSETU ACCOUNT
         </span>
 
         <h2>
-          Login to KaamSetu
+          Login with mobile number
         </h2>
 
         <p>
           Enter your mobile number to continue.
         </p>
-
       </div>
 
-      <input
-        id="phone"
-        type="tel"
-        inputmode="numeric"
-        maxlength="10"
-        placeholder="10 digit mobile number"
+      <form
+        id="phone-form"
+        onsubmit="requestOTP(event)"
       >
 
-      <button
-        class="primary-btn full-btn"
-        onclick="sendOTP()"
-      >
-        Send OTP
-      </button>
+        <label>
+          Mobile Number
+        </label>
 
-      <div id="otpbox"></div>
+        <input
+          id="phone-input"
+          type="tel"
+          inputmode="numeric"
+          maxlength="10"
+          placeholder="10 digit mobile number"
+          autocomplete="tel"
+          required
+        >
+
+        <button
+          type="submit"
+          class="primary-btn"
+        >
+          Send OTP
+        </button>
+
+      </form>
+
+      <div id="otp-area"></div>
 
     </section>
-
   `;
 
+  getApp()
+    .scrollIntoView({
+      behavior: "smooth"
+    });
 }
 
 
-// =====================================================
+// ============================================================
 // SEND OTP
-// =====================================================
+// ============================================================
 
-async function sendOTP() {
+async function requestOTP(event) {
+  event.preventDefault();
 
-  const phoneElement =
-    document.getElementById("phone");
-
-  if (!phoneElement) {
-    return;
-  }
+  const input =
+    document.getElementById(
+      "phone-input"
+    );
 
   const phone =
-    phoneElement.value.trim();
+    String(input?.value || "")
+      .replace(/\D/g, "")
+      .slice(-10);
 
   if (!/^[0-9]{10}$/.test(phone)) {
-
-    alert(
-      "Please enter a valid 10 digit mobile number."
+    showMessage(
+      "Please enter a valid 10 digit mobile number.",
+      "error"
     );
 
     return;
   }
 
   try {
-
     const data =
-      await api(
-        "/api/auth/send-otp",
+      await apiRequest(
+        "/auth/send-otp",
         {
           method: "POST",
-
-          headers: {
-            "Content-Type": "application/json"
-          },
-
           body: JSON.stringify({
-            phone: phone
+            phone
           })
         }
       );
 
+    state.otpPhone = phone;
 
-    document.getElementById("otpbox").innerHTML = `
+    const otpArea =
+      document.getElementById(
+        "otp-area"
+      );
 
+    if (!otpArea) {
+      return;
+    }
+
+    otpArea.innerHTML = `
       <div class="otp-box">
 
-        <p>
-          ${escapeHTML(
-            data.message ||
-            "OTP sent successfully."
-          )}
-        </p>
+        <label>
+          Enter OTP
+        </label>
 
         <input
-          id="otp"
-          type="tel"
+          id="otp-input"
+          type="text"
           inputmode="numeric"
           maxlength="6"
-          placeholder="Enter 6 digit OTP"
+          placeholder="6 digit OTP"
+          autocomplete="one-time-code"
         >
 
         <button
-          class="primary-btn full-btn"
-          onclick="verifyOTP('${escapeAttribute(phone)}')"
+          class="primary-btn"
+          onclick="verifyOTP()"
         >
           Verify OTP
         </button>
 
-        <p style="
-          margin-top:12px;
-          font-size:13px;
-          color:#687386;
-        ">
-          Enter the OTP received on your mobile.
-        </p>
+        ${
+          data.demoOtp
+            ? `
+              <p>
+                Development OTP:
+                <strong>
+                  ${escapeHTML(data.demoOtp)}
+                </strong>
+              </p>
+            `
+            : ""
+        }
 
       </div>
-
     `;
 
+    showMessage(
+      "OTP sent successfully.",
+      "success"
+    );
+
   } catch (error) {
-
-    alert(error.message);
-
+    showMessage(
+      error.message,
+      "error"
+    );
   }
-
 }
 
 
-// =====================================================
+// ============================================================
 // VERIFY OTP
-// =====================================================
+// ============================================================
 
-async function verifyOTP(phone) {
+async function verifyOTP() {
+  const input =
+    document.getElementById(
+      "otp-input"
+    );
 
-  const otpElement =
-    document.getElementById("otp");
+  const otp =
+    String(input?.value || "")
+      .replace(/\D/g, "")
+      .slice(0, 6);
 
-  if (!otpElement) {
-    return;
-  }
-
-  const code =
-    otpElement.value.trim();
-
-
-  if (!/^[0-9]{6}$/.test(code)) {
-
-    alert(
-      "Please enter the 6 digit OTP."
+  if (!/^[0-9]{6}$/.test(otp)) {
+    showMessage(
+      "Please enter the 6 digit OTP.",
+      "error"
     );
 
     return;
   }
 
-
   try {
-
     const data =
-      await api(
-        "/api/auth/verify-otp",
+      await apiRequest(
+        "/auth/verify-otp",
         {
           method: "POST",
-
-          headers: {
-            "Content-Type": "application/json"
-          },
-
           body: JSON.stringify({
-
-            phone: phone,
-
-            otp: code
-
+            phone: state.otpPhone,
+            otp
           })
         }
       );
 
+    state.user = data.user;
 
-    user = data.user;
+    saveSession();
+    updateSessionUI();
 
-
-    localStorage.setItem(
-      "ks_user",
-      JSON.stringify(user)
+    showMessage(
+      "Login successful.",
+      "success"
     );
 
-
-    render();
-
+    renderApp();
 
   } catch (error) {
-
-    alert(error.message);
-
+    showMessage(
+      error.message,
+      "error"
+    );
   }
-
 }
 
 
-// =====================================================
+// ============================================================
 // ROLE SELECTION
-// =====================================================
+// ============================================================
 
-function showRoleSelection() {
+async function selectRole(role) {
+  try {
+    const data =
+      await apiRequest(
+        "/auth/select-role",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            role
+          })
+        }
+      );
 
-  document.getElementById("app").innerHTML = `
+    state.user.role =
+      data.role;
 
-    <section class="panel">
+    saveSession();
+    updateSessionUI();
+    renderApp();
+
+    showMessage(
+      `Account selected as ${role}.`,
+      "success"
+    );
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// MAIN APP RENDER
+// ============================================================
+
+function renderApp() {
+  const app = getApp();
+
+  if (!app) {
+    return;
+  }
+
+  if (!state.user) {
+    app.innerHTML = "";
+    return;
+  }
+
+  if (!state.user.role) {
+    renderRoleSelection();
+    return;
+  }
+
+  if (state.user.role === "customer") {
+    renderCustomerDashboard();
+    return;
+  }
+
+  if (state.user.role === "worker") {
+    renderWorkerDashboard();
+    return;
+  }
+
+  app.innerHTML = "";
+}
+
+
+// ============================================================
+// ROLE SELECTION SCREEN
+// ============================================================
+
+function renderRoleSelection() {
+  getApp().innerHTML = `
+    <section class="auth-card">
 
       <div class="section-heading">
 
@@ -289,1205 +548,61 @@ function showRoleSelection() {
         </span>
 
         <h2>
-          How do you want to use KaamSetu?
+          How will you use KaamSetu?
         </h2>
 
         <p>
-          Choose your account type.
+          Select your account type.
         </p>
 
       </div>
 
-
-      <button
-        class="primary-btn full-btn"
-        onclick="selectRole('customer')"
-      >
-        👤 I need a service
-      </button>
-
-
-      <br><br>
-
-
-      <button
-        class="secondary-btn full-btn"
-        onclick="selectRole('worker')"
-      >
-        🛠️ I provide services
-      </button>
-
-    </section>
-
-  `;
-
-}
-
-
-// =====================================================
-// SELECT ROLE
-// =====================================================
-
-async function selectRole(role) {
-
-  try {
-
-    const data =
-      await api(
-        "/api/auth/select-role",
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type": "application/json"
-          },
-
-          body: JSON.stringify({
-            role: role
-          })
-        }
-      );
-
-
-    user.role =
-      data.role;
-
-
-    localStorage.setItem(
-      "ks_user",
-      JSON.stringify(user)
-    );
-
-
-    render();
-
-
-  } catch (error) {
-
-    alert(error.message);
-
-  }
-
-}
-
-
-// =====================================================
-// CUSTOMER GPS
-// =====================================================
-
-function locate() {
-
-  if (!navigator.geolocation) {
-
-    alert(
-      "GPS is not supported on this device."
-    );
-
-    return;
-  }
-
-
-  navigator.geolocation.getCurrentPosition(
-
-    position => {
-
-      latitude =
-        position.coords.latitude;
-
-      longitude =
-        position.coords.longitude;
-
-
-      alert(
-        "Your location has been detected."
-      );
-
-
-      if (
-        user &&
-        user.role === "customer"
-      ) {
-
-        findWorkers();
-
-      }
-
-    },
-
-
-    error => {
-
-      if (error.code === 1) {
-
-        alert(
-          "Location permission was denied. Please allow location access."
-        );
-
-      } else {
-
-        alert(
-          "Unable to detect your location. Please try again."
-        );
-
-      }
-
-    },
-
-
-    {
-      enableHighAccuracy: true,
-
-      timeout: 15000,
-
-      maximumAge: 60000
-
-    }
-
-  );
-
-}
-
-
-// =====================================================
-// FIND NEARBY WORKERS
-// =====================================================
-
-async function findWorkers() {
-
-  const container =
-    document.getElementById("workers");
-
-
-  if (!container) {
-    return;
-  }
-
-
-  if (
-    latitude === null ||
-    longitude === null
-  ) {
-
-    container.innerHTML = `
-
-      <div class="empty-state">
-
-        <div class="empty-icon">
-          📍
-        </div>
-
-        <h3>
-          Turn on your location
-        </h3>
-
-        <p>
-          Use GPS to find nearby available workers.
-        </p>
-
-        <br>
+      <div class="role-grid">
 
         <button
-          class="primary-btn"
-          onclick="locate()"
+          class="service-card"
+          onclick="selectRole('customer')"
         >
-          Use GPS
+          <span>🏠</span>
+
+          <b>
+            I'm a Customer
+          </b>
+
+          <small>
+            I need a service professional.
+          </small>
+        </button>
+
+        <button
+          class="service-card"
+          onclick="selectRole('worker')"
+        >
+          <span>🛠️</span>
+
+          <b>
+            I'm a Worker
+          </b>
+
+          <small>
+            I provide professional services.
+          </small>
         </button>
 
       </div>
 
-    `;
-
-    return;
-  }
-
-
-  container.innerHTML = `
-
-    <div class="loading">
-      Finding nearby workers...
-    </div>
-
-  `;
-
-
-  try {
-
-    const params =
-      new URLSearchParams();
-
-
-    params.set(
-      "category",
-      category
-    );
-
-
-    params.set(
-      "lat",
-      String(latitude)
-    );
-
-
-    params.set(
-      "lng",
-      String(longitude)
-    );
-
-
-    params.set(
-      "radius",
-      "10"
-    );
-
-
-    const data =
-      await api(
-        "/api/workers/nearby?" +
-        params.toString()
-      );
-
-
-    const workers =
-      data.workers || [];
-
-
-    if (!workers.length) {
-
-      container.innerHTML = `
-
-        <div class="empty-state">
-
-          <div class="empty-icon">
-            🔍
-          </div>
-
-          <h3>
-            No workers found
-          </h3>
-
-          <p>
-            No approved ${escapeHTML(
-              category.toLowerCase()
-            )} workers are available nearby right now.
-          </p>
-
-        </div>
-
-      `;
-
-      return;
-    }
-
-
-    container.innerHTML =
-      workers.map(worker => `
-
-        <article class="worker-card">
-
-          <div class="worker-avatar">
-            ${getInitials(worker.name)}
-          </div>
-
-
-          <div class="worker-info">
-
-            <div class="worker-name-row">
-
-              <h3>
-                ${escapeHTML(worker.name)}
-              </h3>
-
-              <span class="verified-badge">
-                ✓ Verified
-              </span>
-
-            </div>
-
-
-            <p class="worker-category">
-              ${escapeHTML(worker.category)}
-            </p>
-
-
-            <div class="worker-meta">
-
-              <span>
-                ⭐ ${worker.rating || 5}
-              </span>
-
-              <span>
-                ${worker.experience || 0}
-                years experience
-              </span>
-
-              <span>
-                ${
-                  worker.distanceKm == null
-                    ? "Distance unavailable"
-                    : worker.distanceKm + " km away"
-                }
-              </span>
-
-            </div>
-
-
-            ${
-              worker.skills
-                ? `
-                  <p class="worker-bio">
-                    <strong>Skills:</strong>
-                    ${escapeHTML(worker.skills)}
-                  </p>
-                `
-                : ""
-            }
-
-
-            ${
-              worker.bio
-                ? `
-                  <p class="worker-bio">
-                    ${escapeHTML(worker.bio)}
-                  </p>
-                `
-                : ""
-            }
-
-          </div>
-
-
-          <div class="worker-action">
-
-            <strong>
-              ${
-                worker.rate
-                  ? "₹" + worker.rate
-                  : "Quote"
-              }
-            </strong>
-
-            <small>
-              starting
-            </small>
-
-
-            <button
-              class="primary-btn"
-              onclick="
-                bookWorker(
-                  ${Number(worker.id)},
-                  '${escapeAttribute(worker.category)}',
-                  ${Number(worker.rate) || 0}
-                )
-              "
-            >
-              Request
-            </button>
-
-          </div>
-
-        </article>
-
-      `).join("");
-
-
-  } catch (error) {
-
-    container.innerHTML = `
-
-      <div class="error-state">
-        ${escapeHTML(error.message)}
-      </div>
-
-    `;
-
-  }
-
-}
-
-
-// =====================================================
-// BOOK WORKER
-// =====================================================
-
-async function bookWorker(
-  workerId,
-  workerCategory,
-  rate
-) {
-
-  const description =
-    prompt(
-      "Describe the work you need:"
-    );
-
-
-  if (description === null) {
-    return;
-  }
-
-
-  const address =
-    prompt(
-      "Enter your work address:"
-    );
-
-
-  if (address === null) {
-    return;
-  }
-
-
-  const duration =
-    prompt(
-      "Enter work type: small-work or full-day",
-      "small-work"
-    );
-
-
-  if (duration === null) {
-    return;
-  }
-
-
-  try {
-
-    await api(
-      "/api/bookings",
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json"
-        },
-
-        body: JSON.stringify({
-
-          workerId:
-            Number(workerId),
-
-          category:
-            workerCategory,
-
-          description:
-            description.trim(),
-
-          address:
-            address.trim(),
-
-          lat:
-            latitude,
-
-          lng:
-            longitude,
-
-          duration:
-            duration.trim(),
-
-          estimatedPrice:
-            Number(rate) || 0
-
-        })
-      }
-    );
-
-
-    alert(
-      "Job request sent successfully!"
-    );
-
-
-    loadBookings();
-
-
-  } catch (error) {
-
-    alert(error.message);
-
-  }
-
-}
-
-
-// =====================================================
-// LOAD BOOKINGS
-// =====================================================
-
-async function loadBookings() {
-
-  const container =
-    document.getElementById("bookings");
-
-
-  if (!container) {
-    return;
-  }
-
-
-  try {
-
-    const data =
-      await api(
-        "/api/bookings/my"
-      );
-
-
-    const bookings =
-      data.bookings || [];
-
-
-    if (!bookings.length) {
-
-      container.innerHTML = `
-
-        <div class="empty-state">
-
-          <div class="empty-icon">
-            📅
-          </div>
-
-          <h3>
-            No bookings yet
-          </h3>
-
-          <p>
-            Your bookings will appear here.
-          </p>
-
-        </div>
-
-      `;
-
-      return;
-    }
-
-
-    container.innerHTML =
-      bookings.map(booking => `
-
-        <article class="booking-card">
-
-          <div>
-
-            <span class="booking-id">
-              #${Number(booking.id)}
-            </span>
-
-
-            <h3>
-              ${escapeHTML(
-                booking.category
-              )}
-            </h3>
-
-
-            ${
-              user.role === "customer"
-                ? `
-                  <p>
-                    Worker:
-                    <strong>
-                      ${escapeHTML(
-                        booking.worker_name ||
-                        "Worker"
-                      )}
-                    </strong>
-                  </p>
-                `
-                : `
-                  <p>
-                    Customer:
-                    <strong>
-                      ${escapeHTML(
-                        booking.customer_phone ||
-                        "Customer"
-                      )}
-                    </strong>
-                  </p>
-                `
-            }
-
-
-            ${
-              booking.description
-                ? `
-                  <p>
-                    ${escapeHTML(
-                      booking.description
-                    )}
-                  </p>
-                `
-                : ""
-            }
-
-          </div>
-
-
-          <div class="booking-status">
-
-            <span
-              class="status status-${escapeAttribute(
-                booking.status
-              )}"
-            >
-              ${formatStatus(
-                booking.status
-              )}
-            </span>
-
-          </div>
-
-        </article>
-
-      `).join("");
-
-
-  } catch (error) {
-
-    container.innerHTML = `
-
-      <div class="error-state">
-        ${escapeHTML(error.message)}
-      </div>
-
-    `;
-
-  }
-
-}
-
-
-// =====================================================
-// WORKER DASHBOARD
-// =====================================================
-
-function workerDashboard() {
-
-  document.getElementById("app").innerHTML = `
-
-    <section class="panel">
-
-      <div class="section-heading">
-
-        <span class="eyebrow">
-          WORKER PROFILE
-        </span>
-
-        <h2>
-          Create your professional profile
-        </h2>
-
-        <p>
-          Your profile will be reviewed by KaamSetu
-          before customers can see you.
-        </p>
-
-      </div>
-
-
-      <input
-        id="workerName"
-        placeholder="Full name"
-      >
-
-
-      <select id="workerCategory">
-
-        ${categories.map(
-          item => `
-
-            <option
-              value="${escapeAttribute(item)}"
-            >
-              ${escapeHTML(item)}
-            </option>
-
-          `
-        ).join("")}
-
-      </select>
-
-
-      <input
-        id="workerSkills"
-        placeholder="Skills e.g. pipe repair, wiring"
-      >
-
-
-      <input
-        id="workerExperience"
-        type="number"
-        min="0"
-        placeholder="Experience in years"
-      >
-
-
-      <input
-        id="workerRate"
-        type="number"
-        min="0"
-        placeholder="Starting rate ₹"
-      >
-
-
-      <textarea
-        id="workerBio"
-        rows="4"
-        placeholder="Short description about your work"
-      ></textarea>
-
-
-      <button
-        class="primary-btn full-btn"
-        onclick="saveWorkerProfile()"
-      >
-        Submit Profile
-      </button>
-
-
-      <br>
-
-
-      <button
-        class="secondary-btn full-btn"
-        onclick="updateWorkerGPS()"
-      >
-        📍 Update GPS Location
-      </button>
-
-      
-      <div
-        id="workerGpsStatus"
-        style="
-          margin-top:10px;
-          font-size:13px;
-          color:#687386;
-        "
-      >
-        GPS location not updated.
-      </div>
-
-
-      <div
-        id="workerProfileStatus"
-        style="
-          margin-top:12px;
-          font-size:14px;
-        "
-      >
-      </div>
-
     </section>
-
-
-    <section class="panel">
-
-      <div class="section-heading">
-
-        <span class="eyebrow">
-          JOB REQUESTS
-        </span>
-
-        <h2>
-          Your bookings
-        </h2>
-
-      </div>
-
-
-      <div id="bookings">
-        Loading...
-      </div>
-
-    </section>
-
   `;
-
-
-  loadBookings();
-
 }
 
 
-// =====================================================
-// SAVE WORKER PROFILE
-// =====================================================
-
-async function saveWorkerProfile() {
-
-  const nameElement =
-    document.getElementById("workerName");
-
-  const categoryElement =
-    document.getElementById("workerCategory");
-
-  const skillsElement =
-    document.getElementById("workerSkills");
-
-  const experienceElement =
-    document.getElementById("workerExperience");
-
-  const rateElement =
-    document.getElementById("workerRate");
-
-  const bioElement =
-    document.getElementById("workerBio");
-
-
-  if (
-    !nameElement ||
-    !categoryElement ||
-    !skillsElement ||
-    !experienceElement ||
-    !rateElement ||
-    !bioElement
-  ) {
-
-    alert(
-      "Worker profile form could not be loaded."
-    );
-
-    return;
-  }
-
-
-  const name =
-    nameElement.value.trim();
-
-  const selectedCategory =
-    categoryElement.value;
-
-  const skills =
-    skillsElement.value.trim();
-
-  const experience =
-    Number(
-      experienceElement.value
-    ) || 0;
-
-  const rate =
-    Number(
-      rateElement.value
-    ) || 0;
-
-  const bio =
-    bioElement.value.trim();
-
-
-  if (!name) {
-
-    alert(
-      "Please enter your name."
-    );
-
-    return;
-  }
-
-
-  if (!selectedCategory) {
-
-    alert(
-      "Please select a service category."
-    );
-
-    return;
-  }
-
-
-  if (
-    experience < 0 ||
-    rate < 0
-  ) {
-
-    alert(
-      "Experience and rate cannot be negative."
-    );
-
-    return;
-  }
-
-
-  try {
-
-    const data =
-      await api(
-        "/api/workers/register",
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type": "application/json"
-          },
-
-          body: JSON.stringify({
-
-            name:
-              name,
-
-            category:
-              selectedCategory,
-
-            skills:
-              skills,
-
-            experience:
-              experience,
-
-            rate:
-              rate,
-
-            bio:
-              bio,
-
-            lat:
-              latitude,
-
-            lng:
-              longitude
-
-          })
-        }
-      );
-
-
-    const status =
-      document.getElementById(
-        "workerProfileStatus"
-      );
-
-
-    if (status) {
-
-      status.innerHTML = `
-        <span>
-          ✅ ${escapeHTML(
-            data.message ||
-            "Profile submitted successfully."
-          )}
-        </span>
-      `;
-
-    }
-
-
-    alert(
-      data.message ||
-      "Profile submitted successfully. Admin approval is required."
-    );
-
-
-  } catch (error) {
-
-    alert(
-      error.message
-    );
-
-  }
-
-}
-
-
-// =====================================================
-// WORKER GPS
-// =====================================================
-
-function updateWorkerGPS() {
-
-  if (!navigator.geolocation) {
-
-    alert(
-      "GPS is not supported on this device."
-    );
-
-    return;
-  }
-
-
-  navigator.geolocation.getCurrentPosition(
-
-    async position => {
-
-      const newLatitude =
-        position.coords.latitude;
-
-      const newLongitude =
-        position.coords.longitude;
-
-
-      try {
-
-        await api(
-          "/api/workers/location",
-          {
-            method: "POST",
-
-            headers: {
-              "Content-Type": "application/json"
-            },
-
-            body: JSON.stringify({
-
-              lat:
-                newLatitude,
-
-              lng:
-                newLongitude
-
-            })
-          }
-        );
-
-
-        latitude =
-          newLatitude;
-
-        longitude =
-          newLongitude;
-
-
-        const status =
-          document.getElementById(
-            "workerGpsStatus"
-          );
-
-
-        if (status) {
-
-          status.textContent =
-            "✅ GPS location updated successfully.";
-
-        }
-
-
-        alert(
-          "GPS location updated successfully."
-        );
-
-
-      } catch (error) {
-
-        alert(
-          "Location update failed: " +
-          error.message
-        );
-
-      }
-
-    },
-
-
-    error => {
-
-      if (error.code === 1) {
-
-        alert(
-          "Location permission was denied. Please allow location access."
-        );
-
-      } else if (error.code === 2) {
-
-        alert(
-          "Your location could not be detected."
-        );
-
-      } else if (error.code === 3) {
-
-        alert(
-          "Location request timed out. Please try again."
-        );
-
-      } else {
-
-        alert(
-          "Unable to access your location."
-        );
-
-      }
-
-    },
-
-
-    {
-      enableHighAccuracy: true,
-
-      timeout: 15000,
-
-      maximumAge: 60000
-
-    }
-
-  );
-
-}
-
-
-// =====================================================
-// NOTIFICATIONS
-// =====================================================
-
-async function loadNotifications() {
-
-  try {
-
-    const data =
-      await api(
-        "/api/notifications"
-      );
-
-
-    return data.notifications || [];
-
-
-  } catch (error) {
-
-    console.error(
-      "Notification error:",
-      error
-    );
-
-
-    return [];
-
-  }
-
-}
-
-
-// =====================================================
-// LOGOUT
-// =====================================================
-
-function logout() {
-
-  localStorage.removeItem(
-    "ks_user"
-  );
-
-
-  user = null;
-
-
-  latitude = null;
-  longitude = null;
-
-
-  location.reload();
-
-}
-
-
-// =====================================================
+// ============================================================
 // CUSTOMER DASHBOARD
-// =====================================================
+// ============================================================
 
-function customerDashboard() {
-
-  document.getElementById("app").innerHTML = `
-
-    <section
-      id="worker-section"
-      class="panel"
-    >
+function renderCustomerDashboard() {
+  getApp().innerHTML = `
+    <section class="dashboard-card">
 
       <div class="section-heading">
 
@@ -1496,302 +611,2353 @@ function customerDashboard() {
         </span>
 
         <h2>
-          Find a ${escapeHTML(category)}
+          Book a local professional
         </h2>
 
         <p>
-          Select a service and find available
-          professionals near your location.
+          Select a service and find approved
+          workers near your location.
         </p>
 
       </div>
 
+      <div class="dashboard-actions">
 
-      <div class="service-selector">
-
-        ${categories.map(
-          item => `
-
-            <button
-              class="service-chip ${
-                item === category
-                  ? "active"
-                  : ""
-              }"
-              onclick="
-                category='${escapeAttribute(item)}';
-                render();
-              "
-            >
-              ${escapeHTML(item)}
-            </button>
-
-          `
-        ).join("")}
-
-      </div>
-
-
-      <div class="location-bar">
-
-        <div>
-
-          <strong>
-            📍 Location
-          </strong>
-
-          <small>
-            ${
-              latitude !== null &&
-              longitude !== null
-                ? "GPS location detected"
-                : "GPS not selected"
-            }
-          </small>
-
-        </div>
-
+        <button
+          class="primary-btn"
+          onclick="locate()"
+        >
+          📍 Find Nearby Workers
+        </button>
 
         <button
           class="secondary-btn"
-          onclick="locate()"
+          onclick="loadMyBookings()"
         >
-          ${
-            latitude !== null
-              ? "Update GPS"
-              : "Use GPS"
-          }
+          My Bookings
+        </button>
+
+        <button
+          class="secondary-btn"
+          onclick="loadNotifications()"
+        >
+          Notifications
         </button>
 
       </div>
 
-
-      <div
-        id="workers"
-        class="workers-list"
-      >
-      </div>
+      <div id="customer-content"></div>
 
     </section>
+  `;
+
+  renderCustomerHome();
+}
 
 
-    <section class="panel">
+// ============================================================
+// CUSTOMER HOME
+// ============================================================
+
+function renderCustomerHome() {
+  const content =
+    document.getElementById(
+      "customer-content"
+    );
+
+  if (!content) {
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="booking-search">
+
+      <label>
+        Select service
+      </label>
+
+      <select id="customer-category">
+
+        <option value="">
+          Choose a service
+        </option>
+
+        <option>
+          Plumber
+        </option>
+
+        <option>
+          Electrician
+        </option>
+
+        <option>
+          Carpenter
+        </option>
+
+        <option>
+          Painter
+        </option>
+
+        <option>
+          Cleaner
+        </option>
+
+        <option>
+          AC Technician
+        </option>
+
+        <option>
+          Mechanic
+        </option>
+
+        <option>
+          General Labour
+        </option>
+
+      </select>
+
+      <button
+        class="primary-btn"
+        onclick="findWorkersFromForm()"
+      >
+        Find Workers
+      </button>
+
+    </div>
+
+    <div id="worker-results"></div>
+  `;
+}
+
+
+// ============================================================
+// SERVICE SELECT FROM HERO CARDS
+// ============================================================
+
+function selectService(category) {
+  state.selectedService = category;
+
+  if (!state.user) {
+    showAuth();
+    return;
+  }
+
+  if (state.user.role !== "customer") {
+    showMessage(
+      "Only customer accounts can book workers.",
+      "error"
+    );
+
+    return;
+  }
+
+  renderCustomerDashboard();
+
+  const select =
+    document.getElementById(
+      "customer-category"
+    );
+
+  if (select) {
+    select.value = category;
+  }
+
+  locate();
+}
+
+
+// ============================================================
+// FIND WORKERS FROM FORM
+// ============================================================
+
+async function findWorkersFromForm() {
+  const select =
+    document.getElementById(
+      "customer-category"
+    );
+
+  const category =
+    String(select?.value || "").trim();
+
+  if (!category) {
+    showMessage(
+      "Please select a service.",
+      "error"
+    );
+
+    return;
+  }
+
+  state.selectedService = category;
+
+  await locate();
+}
+
+
+// ============================================================
+// GPS LOCATION
+// ============================================================
+
+function locate() {
+  if (!state.user) {
+    showAuth();
+    return;
+  }
+
+  if (state.user.role !== "customer") {
+    showMessage(
+      "GPS worker search is available for customers.",
+      "error"
+    );
+
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    showMessage(
+      "GPS is not supported by this browser.",
+      "error"
+    );
+
+    return;
+  }
+
+  const category =
+    state.selectedService ||
+    document.getElementById(
+      "customer-category"
+    )?.value ||
+    "";
+
+  if (!category) {
+    showMessage(
+      "First select the service you need.",
+      "error"
+    );
+
+    renderCustomerDashboard();
+
+    return;
+  }
+
+  showMessage(
+    "Getting your location...",
+    "info"
+  );
+
+  navigator.geolocation.getCurrentPosition(
+    async position => {
+
+      state.customerLocation = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+      };
+
+      await findNearbyWorkers(
+        category
+      );
+
+    },
+    error => {
+
+      let message =
+        "Unable to get your location.";
+
+      if (
+        error.code ===
+        error.PERMISSION_DENIED
+      ) {
+        message =
+          "Location permission was denied. Please allow GPS access.";
+      }
+
+      if (
+        error.code ===
+        error.POSITION_UNAVAILABLE
+      ) {
+        message =
+          "Your location is currently unavailable.";
+      }
+
+      if (
+        error.code ===
+        error.TIMEOUT
+      ) {
+        message =
+          "Location request timed out.";
+      }
+
+      showMessage(
+        message,
+        "error"
+      );
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 60000
+    }
+  );
+}
+
+
+// ============================================================
+// NEARBY WORKER SEARCH
+// ============================================================
+
+async function findNearbyWorkers(
+  category
+) {
+  if (!state.customerLocation) {
+    return;
+  }
+
+  const params =
+    new URLSearchParams({
+      lat: state.customerLocation.lat,
+      lng: state.customerLocation.lng,
+      category
+    });
+
+  try {
+    const data =
+      await apiRequest(
+        `/workers/nearby?${params.toString()}`
+      );
+
+    state.nearbyWorkers =
+      Array.isArray(data.workers)
+        ? data.workers
+        : [];
+
+    renderWorkerResults();
+
+    if (!state.nearbyWorkers.length) {
+      showMessage(
+        "No approved available worker was found in the available search range.",
+        "info"
+      );
+    }
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// WORKER RESULTS
+// ============================================================
+
+function renderWorkerResults() {
+  const results =
+    document.getElementById(
+      "worker-results"
+    );
+
+  if (!results) {
+    return;
+  }
+
+  if (!state.nearbyWorkers.length) {
+    results.innerHTML = `
+      <div class="empty-state">
+        <h3>
+          No workers found
+        </h3>
+
+        <p>
+          Please try another service or search again later.
+        </p>
+      </div>
+    `;
+
+    return;
+  }
+
+  results.innerHTML = `
+    <div class="section-heading">
+      <span class="eyebrow">
+        AVAILABLE WORKERS
+      </span>
+
+      <h3>
+        Professionals near you
+      </h3>
+
+      <p>
+        KaamSetu prioritizes the nearest successful GPS range.
+      </p>
+    </div>
+
+    <div class="worker-grid">
+
+      ${state.nearbyWorkers
+        .map(worker => `
+          <article class="worker-card">
+
+            <div class="worker-avatar">
+              🛠️
+            </div>
+
+            <h3>
+              ${escapeHTML(worker.name)}
+            </h3>
+
+            <p>
+              ${escapeHTML(worker.category)}
+            </p>
+
+            <div class="worker-info">
+
+              <span>
+                ⭐ ${escapeHTML(worker.rating)}
+              </span>
+
+              <span>
+                📍 ${escapeHTML(worker.distanceKm)} km
+              </span>
+
+              <span>
+                ₹${escapeHTML(worker.rate)}
+              </span>
+
+            </div>
+
+            ${
+              worker.skills
+                ? `
+                  <p>
+                    ${escapeHTML(worker.skills)}
+                  </p>
+                `
+                : ""
+            }
+
+            ${
+              worker.experience !== undefined
+                ? `
+                  <small>
+                    ${escapeHTML(worker.experience)}
+                    years experience
+                  </small>
+                `
+                : ""
+            }
+
+            <button
+              class="primary-btn"
+              onclick="openBooking(${Number(worker.id)})"
+            >
+              Appoint Worker
+            </button>
+
+          </article>
+        `)
+        .join("")}
+
+    </div>
+  `;
+}
+
+
+// ============================================================
+// BOOKING FORM
+// ============================================================
+
+function openBooking(workerId) {
+  const worker =
+    state.nearbyWorkers.find(
+      item =>
+        Number(item.id) ===
+        Number(workerId)
+    );
+
+  if (!worker) {
+    showMessage(
+      "Worker information not found.",
+      "error"
+    );
+
+    return;
+  }
+
+  state.selectedWorker = worker;
+
+  const content =
+    document.getElementById(
+      "customer-content"
+    );
+
+  if (!content) {
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="booking-card">
 
       <div class="section-heading">
 
         <span class="eyebrow">
-          YOUR ACTIVITY
+          APPOINT WORKER
         </span>
 
-        <h2>
-          My bookings
-        </h2>
+        <h3>
+          ${escapeHTML(worker.name)}
+        </h3>
+
+        <p>
+          ${escapeHTML(worker.category)}
+        </p>
 
       </div>
 
+      <div class="price-summary">
 
-      <div id="bookings">
-        Loading...
+        <p>
+          Worker price:
+          <strong>
+            ${money(worker.rate)}
+          </strong>
+        </p>
+
+        <p>
+          Platform fee:
+          <strong>
+            Calculated securely by KaamSetu
+          </strong>
+        </p>
+
+        <p>
+          Final customer total:
+          <strong>
+            Calculated after booking
+          </strong>
+        </p>
+
       </div>
 
-    </section>
+      <form
+        onsubmit="createBooking(event)"
+      >
 
+        <label>
+          Work description
+        </label>
+
+        <textarea
+          id="booking-description"
+          maxlength="1500"
+          required
+          placeholder="Describe what needs to be done..."
+        ></textarea>
+
+        <label>
+          Work address
+        </label>
+
+        <textarea
+          id="booking-address"
+          maxlength="1000"
+          required
+          placeholder="Enter the complete work address..."
+        ></textarea>
+
+        <label>
+          Work type / duration
+        </label>
+
+        <select
+          id="booking-duration"
+          required
+        >
+
+          <option value="">
+            Select work type
+          </option>
+
+          <option value="Small Job">
+            Small Job
+          </option>
+
+          <option value="Few Hours">
+            Few Hours
+          </option>
+
+          <option value="Half Day">
+            Half Day
+          </option>
+
+          <option value="Full Day">
+            Full Day
+          </option>
+
+        </select>
+
+        <label>
+          Payment method
+        </label>
+
+        <select
+          id="booking-payment"
+          required
+        >
+
+          <option value="cash">
+            Cash
+          </option>
+
+          <option value="online">
+            Online
+          </option>
+
+        </select>
+
+        <div class="booking-warning">
+          Worker contact details are revealed only
+          after the worker accepts the booking.
+        </div>
+
+        <button
+          type="submit"
+          class="primary-btn"
+        >
+          Confirm Appointment
+        </button>
+
+        <button
+          type="button"
+          class="secondary-btn"
+          onclick="renderCustomerDashboard()"
+        >
+          Cancel
+        </button>
+
+      </form>
+
+    </div>
   `;
-
-
-  findWorkers();
-
-  loadBookings();
-
 }
 
 
-// =====================================================
-// MAIN RENDER
-// =====================================================
+// ============================================================
+// CREATE BOOKING
+// ============================================================
 
-function render() {
+async function createBooking(event) {
+  event.preventDefault();
 
-  const session =
-    document.getElementById("session");
-
-
-  if (!user) {
-
-    if (session) {
-      session.innerHTML = "";
-    }
-
-
-    showAuth();
+  if (!state.selectedWorker) {
+    showMessage(
+      "Please select a worker first.",
+      "error"
+    );
 
     return;
   }
 
+  const description =
+    document.getElementById(
+      "booking-description"
+    )?.value.trim();
 
-  if (!user.role) {
+  const address =
+    document.getElementById(
+      "booking-address"
+    )?.value.trim();
 
-    if (session) {
-      session.innerHTML = "";
-    }
+  const duration =
+    document.getElementById(
+      "booking-duration"
+    )?.value.trim();
 
+  const paymentMethod =
+    document.getElementById(
+      "booking-payment"
+    )?.value;
 
-    showRoleSelection();
+  if (!description || !address || !duration) {
+    showMessage(
+      "Please complete all booking details.",
+      "error"
+    );
 
     return;
   }
 
+  try {
+    const data =
+      await apiRequest(
+        "/bookings",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            workerId:
+              Number(
+                state.selectedWorker.id
+              ),
 
-  if (session) {
+            category:
+              state.selectedWorker.category,
 
-    session.innerHTML = `
+            description,
 
-      <div class="session-user">
+            address,
 
-        <span>
-          ${escapeHTML(user.phone)}
+            duration,
+
+            paymentMethod,
+
+            lat:
+              state.customerLocation?.lat ??
+              null,
+
+            lng:
+              state.customerLocation?.lng ??
+              null
+          })
+        }
+      );
+
+    state.pendingBooking = data;
+
+    renderBookingConfirmation(
+      data
+    );
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// BOOKING CONFIRMATION
+// ============================================================
+
+function renderBookingConfirmation(
+  data
+) {
+  const content =
+    document.getElementById(
+      "customer-content"
+    );
+
+  if (!content) {
+    return;
+  }
+
+  const pricing =
+    data.pricing || {};
+
+  content.innerHTML = `
+    <div class="booking-card">
+
+      <div class="section-heading">
+
+        <span class="eyebrow">
+          BOOKING CREATED
         </span>
 
+        <h3>
+          Appointment request sent
+        </h3>
+
+        <p>
+          Booking #${escapeHTML(data.bookingId)}
+        </p>
+
+      </div>
+
+      <div class="price-summary">
+
+        <p>
+          Worker price:
+          <strong>
+            ${money(pricing.workerPrice)}
+          </strong>
+        </p>
+
+        <p>
+          Platform fee:
+          <strong>
+            ${money(pricing.platformFee)}
+          </strong>
+        </p>
+
+        <p>
+          Customer total:
+          <strong>
+            ${money(pricing.customerTotal)}
+          </strong>
+        </p>
+
+      </div>
+
+      <div class="booking-code-box">
+
+        <h3>
+          Completion Code
+        </h3>
+
+        <p>
+          Keep this code safe.
+          The appointed worker will need it
+          to complete the job.
+        </p>
+
+        <strong class="completion-code">
+          ${escapeHTML(data.completionCode)}
+        </strong>
+
+      </div>
+
+      <div class="booking-warning">
+
+        ${
+          data.paymentMethod === "online"
+            ? `
+              Online payment is selected.
+              Payment must be completed through the
+              configured payment gateway before the worker
+              can accept the booking.
+            `
+            : `
+              Cash payment selected.
+              The worker will receive the booking request
+              and contact details become available after
+              acceptance.
+            `
+        }
+
+      </div>
+
+      ${
+        data.paymentMethod === "online"
+          ? `
+            <button
+              class="primary-btn"
+              onclick="startOnlinePayment(${Number(data.bookingId)})"
+            >
+              Continue to Online Payment
+            </button>
+          `
+          : ""
+      }
+
+      <button
+        class="secondary-btn"
+        onclick="loadMyBookings()"
+      >
+        View My Bookings
+      </button>
+
+    </div>
+  `;
+}
+
+
+// ============================================================
+// ONLINE PAYMENT
+// ============================================================
+
+async function startOnlinePayment(
+  bookingId
+) {
+  try {
+    const data =
+      await apiRequest(
+        "/payments/create",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            bookingId
+          })
+        }
+      );
+
+    if (data.alreadyPaid) {
+      showMessage(
+        "This booking is already paid.",
+        "success"
+      );
+
+      return;
+    }
+
+    showMessage(
+      data.message ||
+      "Online payment gateway is not configured yet.",
+      "info"
+    );
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// CUSTOMER BOOKINGS
+// ============================================================
+
+async function loadMyBookings() {
+  if (!state.user) {
+    showAuth();
+    return;
+  }
+
+  try {
+    const data =
+      await apiRequest(
+        "/bookings/my"
+      );
+
+    state.currentBookings =
+      Array.isArray(data.bookings)
+        ? data.bookings
+        : [];
+
+    renderMyBookings();
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// RENDER CUSTOMER BOOKINGS
+// ============================================================
+
+function renderMyBookings() {
+  const content =
+    document.getElementById(
+      "customer-content"
+    );
+
+  if (!content) {
+    return;
+  }
+
+  if (!state.currentBookings.length) {
+    content.innerHTML = `
+      <div class="empty-state">
+
+        <h3>
+          No bookings yet
+        </h3>
+
+        <p>
+          Your bookings will appear here.
+        </p>
 
         <button
-          class="logout-btn"
-          onclick="logout()"
+          class="primary-btn"
+          onclick="renderCustomerHome()"
         >
-          Logout
+          Find a Worker
+        </button>
+
+      </div>
+    `;
+
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="section-heading">
+
+      <span class="eyebrow">
+        MY BOOKINGS
+      </span>
+
+      <h3>
+        Your appointments
+      </h3>
+
+    </div>
+
+    <div class="booking-list">
+
+      ${state.currentBookings
+        .map(booking => {
+
+          const canContact =
+            [
+              "accepted",
+              "in_progress",
+              "completed"
+            ].includes(
+              booking.status
+            );
+
+          return `
+            <article class="booking-card">
+
+              <h3>
+                ${escapeHTML(
+                  booking.worker_name
+                )}
+              </h3>
+
+              <p>
+                Booking #${escapeHTML(booking.id)}
+              </p>
+
+              <p>
+                Status:
+                <strong>
+                  ${escapeHTML(booking.status)}
+                </strong>
+              </p>
+
+              <p>
+                Worker price:
+                ${money(booking.worker_price)}
+              </p>
+
+              <p>
+                Platform fee:
+                ${money(booking.platform_fee)}
+              </p>
+
+              <p>
+                Total:
+                <strong>
+                  ${money(booking.customer_total)}
+                </strong>
+              </p>
+
+              <p>
+                Payment:
+                ${escapeHTML(booking.payment_method)}
+                /
+                ${escapeHTML(booking.payment_status)}
+              </p>
+
+              ${
+                canContact
+                  ? `
+                    <button
+                      class="primary-btn"
+                      onclick="getWorkerContact(${Number(booking.id)})"
+                    >
+                      📞 Show Worker Number
+                    </button>
+                  `
+                  : `
+                    <p>
+                      📞 Worker number will be available
+                      after the worker accepts the booking.
+                    </p>
+                  `
+              }
+
+            </article>
+          `;
+        })
+        .join("")}
+
+    </div>
+  `;
+}
+
+
+// ============================================================
+// GET WORKER CONTACT
+// ============================================================
+
+async function getWorkerContact(
+  bookingId
+) {
+  try {
+    const data =
+      await apiRequest(
+        `/bookings/${Number(bookingId)}/contact`
+      );
+
+    const phone =
+      String(data.workerPhone || "");
+
+    if (!phone) {
+      throw new Error(
+        "Worker phone number is unavailable."
+      );
+    }
+
+    showPhoneDialog(
+      phone
+    );
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// PHONE DIALOG
+// ============================================================
+
+function showPhoneDialog(
+  phone
+) {
+  const old =
+    document.getElementById(
+      "ks-phone-dialog"
+    );
+
+  if (old) {
+    old.remove();
+  }
+
+  const overlay =
+    document.createElement("div");
+
+  overlay.id =
+    "ks-phone-dialog";
+
+  overlay.className =
+    "ks-modal-overlay";
+
+  overlay.innerHTML = `
+    <div class="ks-modal">
+
+      <h3>
+        Worker Contact
+      </h3>
+
+      <p>
+        You can contact your appointed worker
+        using this number.
+      </p>
+
+      <a
+        href="tel:${escapeHTML(phone)}"
+        class="primary-btn"
+      >
+        📞 ${escapeHTML(phone)}
+      </a>
+
+      <button
+        class="secondary-btn"
+        onclick="document.getElementById('ks-phone-dialog').remove()"
+      >
+        Close
+      </button>
+
+    </div>
+  `;
+
+  document.body.appendChild(
+    overlay
+  );
+}
+
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+async function loadNotifications() {
+  try {
+    const data =
+      await apiRequest(
+        "/notifications"
+      );
+
+    state.notifications =
+      Array.isArray(data.notifications)
+        ? data.notifications
+        : [];
+
+    renderNotifications();
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// RENDER NOTIFICATIONS
+// ============================================================
+
+function renderNotifications() {
+  const content =
+    document.getElementById(
+      "customer-content"
+    );
+
+  if (!content) {
+    return;
+  }
+
+  if (!state.notifications.length) {
+    content.innerHTML = `
+      <div class="empty-state">
+
+        <h3>
+          No notifications
+        </h3>
+
+      </div>
+    `;
+
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="section-heading">
+
+      <span class="eyebrow">
+        NOTIFICATIONS
+      </span>
+
+      <h3>
+        Updates
+      </h3>
+
+    </div>
+
+    <div class="notification-list">
+
+      ${state.notifications
+        .map(notification => `
+          <article class="notification-card">
+
+            <strong>
+              ${escapeHTML(notification.type)}
+            </strong>
+
+            <p>
+              ${escapeHTML(notification.message)}
+            </p>
+
+            <small>
+              ${escapeHTML(notification.created_at)}
+            </small>
+
+            ${
+              !notification.read
+                ? `
+                  <button
+                    class="secondary-btn"
+                    onclick="markNotificationRead(${Number(notification.id)})"
+                  >
+                    Mark as read
+                  </button>
+                `
+                : `
+                  <small>
+                    Read
+                  </small>
+                `
+            }
+
+          </article>
+        `)
+        .join("")}
+
+    </div>
+  `;
+}
+
+
+// ============================================================
+// MARK NOTIFICATION READ
+// ============================================================
+
+async function markNotificationRead(
+  notificationId
+) {
+  try {
+    await apiRequest(
+      `/notifications/${Number(notificationId)}/read`,
+      {
+        method: "POST"
+      }
+    );
+
+    await loadNotifications();
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// WORKER DASHBOARD
+// ============================================================
+
+function renderWorkerDashboard() {
+  getApp().innerHTML = `
+    <section class="dashboard-card">
+
+      <div class="section-heading">
+
+        <span class="eyebrow">
+          WORKER
+        </span>
+
+        <h2>
+          Manage your KaamSetu work
+        </h2>
+
+        <p>
+          Complete your profile, stay available,
+          and manage customer requests.
+        </p>
+
+      </div>
+
+      <div class="dashboard-actions">
+
+        <button
+          class="primary-btn"
+          onclick="renderWorkerProfile()"
+        >
+          Worker Profile
+        </button>
+
+        <button
+          class="secondary-btn"
+          onclick="loadWorkerBookings()"
+        >
+          My Jobs
+        </button>
+
+        <button
+          class="secondary-btn"
+          onclick="updateWorkerLocation()"
+        >
+          📍 Update GPS
+        </button>
+
+        <button
+          class="secondary-btn"
+          onclick="loadWorkerNotifications()"
+        >
+          Notifications
         </button>
 
       </div>
 
-    `;
+      <div id="worker-content"></div>
 
+    </section>
+  `;
+
+  renderWorkerHome();
+}
+
+
+// ============================================================
+// WORKER HOME
+// ============================================================
+
+function renderWorkerHome() {
+  const content =
+    document.getElementById(
+      "worker-content"
+    );
+
+  if (!content) {
+    return;
   }
 
+  content.innerHTML = `
+    <div class="empty-state">
+
+      <h3>
+        Welcome to KaamSetu
+      </h3>
+
+      <p>
+        Submit your worker profile for admin approval.
+      </p>
+
+      <button
+        class="primary-btn"
+        onclick="renderWorkerProfile()"
+      >
+        Create / Update Profile
+      </button>
+
+    </div>
+  `;
+}
+
+
+// ============================================================
+// WORKER PROFILE
+// ============================================================
+
+function renderWorkerProfile() {
+  const content =
+    document.getElementById(
+      "worker-content"
+    );
+
+  if (!content) {
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="booking-card">
+
+      <div class="section-heading">
+
+        <span class="eyebrow">
+          WORKER PROFILE
+        </span>
+
+        <h3>
+          Register your service
+        </h3>
+
+      </div>
+
+      <form
+        onsubmit="registerWorker(event)"
+      >
+
+        <label>
+          Name
+        </label>
+
+        <input
+          id="worker-name"
+          type="text"
+          maxlength="100"
+          required
+          placeholder="Your full name"
+        >
+
+        <label>
+          Service category
+        </label>
+
+        <select
+          id="worker-category"
+          required
+        >
+
+          <option value="">
+            Select category
+          </option>
+
+          <option>
+            Plumber
+          </option>
+
+          <option>
+            Electrician
+          </option>
+
+          <option>
+            Carpenter
+          </option>
+
+          <option>
+            Painter
+          </option>
+
+          <option>
+            Cleaner
+          </option>
+
+          <option>
+            AC Technician
+          </option>
+
+          <option>
+            Mechanic
+          </option>
+
+          <option>
+            General Labour
+          </option>
+
+        </select>
+
+        <label>
+          Skills
+        </label>
+
+        <input
+          id="worker-skills"
+          type="text"
+          maxlength="500"
+          placeholder="e.g. Pipe repair, fitting, leakage"
+        >
+
+        <label>
+          Experience in years
+        </label>
+
+        <input
+          id="worker-experience"
+          type="number"
+          min="0"
+          max="60"
+          step="1"
+          required
+          value="0"
+        >
+
+        <label>
+          Your service price
+        </label>
+
+        <input
+          id="worker-rate"
+          type="number"
+          min="0"
+          max="1000000"
+          step="0.01"
+          required
+          placeholder="₹500"
+        >
+
+        <label>
+          About you
+        </label>
+
+        <textarea
+          id="worker-bio"
+          maxlength="1000"
+          placeholder="Tell customers about your experience..."
+        ></textarea>
+
+        <button
+          type="submit"
+          class="primary-btn"
+        >
+          Submit Worker Profile
+        </button>
+
+      </form>
+
+      <div class="booking-warning">
+
+        Worker profiles are not visible to customers
+        until they are approved by the KaamSetu admin.
+
+      </div>
+
+    </div>
+  `;
+}
+
+
+// ============================================================
+// REGISTER WORKER
+// ============================================================
+
+async function registerWorker(event) {
+  event.preventDefault();
+
+  const name =
+    document.getElementById(
+      "worker-name"
+    )?.value.trim();
+
+  const category =
+    document.getElementById(
+      "worker-category"
+    )?.value.trim();
+
+  const skills =
+    document.getElementById(
+      "worker-skills"
+    )?.value.trim();
+
+  const experience =
+    Number(
+      document.getElementById(
+        "worker-experience"
+      )?.value
+    );
+
+  const rate =
+    Number(
+      document.getElementById(
+        "worker-rate"
+      )?.value
+    );
+
+  const bio =
+    document.getElementById(
+      "worker-bio"
+    )?.value.trim();
 
   if (
-    user.role === "worker"
+    !name ||
+    !category ||
+    !Number.isFinite(experience) ||
+    !Number.isFinite(rate)
   ) {
-
-    workerDashboard();
+    showMessage(
+      "Please complete all required worker details.",
+      "error"
+    );
 
     return;
-
   }
 
+  let lat = null;
+  let lng = null;
 
-  if (
-    user.role === "customer"
-  ) {
+  if (state.customerLocation) {
+    lat =
+      state.customerLocation.lat;
 
-    customerDashboard();
+    lng =
+      state.customerLocation.lng;
+  }
+
+  try {
+    const data =
+      await apiRequest(
+        "/workers/register",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            category,
+            skills,
+            experience,
+            rate,
+            bio,
+            lat,
+            lng
+          })
+        }
+      );
+
+    showMessage(
+      data.message ||
+      "Worker profile submitted.",
+      "success"
+    );
+
+    renderWorkerHome();
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// WORKER GPS
+// ============================================================
+
+function updateWorkerLocation() {
+  if (!navigator.geolocation) {
+    showMessage(
+      "GPS is not supported by this browser.",
+      "error"
+    );
 
     return;
-
   }
 
-
-  user.role = null;
-
-
-  localStorage.setItem(
-    "ks_user",
-    JSON.stringify(user)
+  showMessage(
+    "Getting your current location...",
+    "info"
   );
 
+  navigator.geolocation.getCurrentPosition(
+    async position => {
 
-  showRoleSelection();
+      const lat =
+        position.coords.latitude;
 
+      const lng =
+        position.coords.longitude;
+
+      try {
+
+        await apiRequest(
+          "/workers/location",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              lat,
+              lng
+            })
+          }
+        );
+
+        showMessage(
+          "Worker GPS location updated.",
+          "success"
+        );
+
+      } catch (error) {
+
+        showMessage(
+          error.message,
+          "error"
+        );
+
+      }
+    },
+    error => {
+
+      if (
+        error.code ===
+        error.PERMISSION_DENIED
+      ) {
+        showMessage(
+          "Please allow location permission.",
+          "error"
+        );
+
+        return;
+      }
+
+      showMessage(
+        "Unable to update your location.",
+        "error"
+      );
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 30000
+    }
+  );
 }
 
 
-// =====================================================
-// HELPERS
-// =====================================================
+// ============================================================
+// WORKER BOOKINGS
+// ============================================================
 
-function getInitials(name) {
+async function loadWorkerBookings() {
+  try {
+    const data =
+      await apiRequest(
+        "/bookings/my"
+      );
 
-  if (!name) {
-    return "KS";
+    state.currentBookings =
+      Array.isArray(data.bookings)
+        ? data.bookings
+        : [];
+
+    renderWorkerBookings();
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// RENDER WORKER BOOKINGS
+// ============================================================
+
+function renderWorkerBookings() {
+  const content =
+    document.getElementById(
+      "worker-content"
+    );
+
+  if (!content) {
+    return;
   }
 
+  if (!state.currentBookings.length) {
+    content.innerHTML = `
+      <div class="empty-state">
 
-  return name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(
-      word =>
-        word.charAt(0).toUpperCase()
-    )
-    .join("");
+        <h3>
+          No jobs yet
+        </h3>
 
+        <p>
+          New customer requests will appear here.
+        </p>
+
+      </div>
+    `;
+
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="section-heading">
+
+      <span class="eyebrow">
+        MY JOBS
+      </span>
+
+      <h3>
+        Customer bookings
+      </h3>
+
+    </div>
+
+    <div class="booking-list">
+
+      ${state.currentBookings
+        .map(booking => `
+          <article class="booking-card">
+
+            <h3>
+              ${escapeHTML(booking.category)}
+            </h3>
+
+            <p>
+              Booking #${escapeHTML(booking.id)}
+            </p>
+
+            <p>
+              Status:
+              <strong>
+                ${escapeHTML(booking.status)}
+              </strong>
+            </p>
+
+            <p>
+              Work:
+              ${escapeHTML(booking.description)}
+            </p>
+
+            <p>
+              Address:
+              ${escapeHTML(booking.address)}
+            </p>
+
+            <p>
+              Worker price:
+              <strong>
+                ${money(booking.worker_price)}
+              </strong>
+            </p>
+
+            <p>
+              Platform fee:
+              ${money(booking.platform_fee)}
+            </p>
+
+            <p>
+              Customer total:
+              ${money(booking.customer_total)}
+            </p>
+
+            <p>
+              Payment:
+              ${escapeHTML(booking.payment_method)}
+              /
+              ${escapeHTML(booking.payment_status)}
+            </p>
+
+            ${
+              booking.customer_phone
+                ? `
+                  <p>
+                    📞 Customer:
+                    ${
+                      booking.customer_phone ===
+                      "Hidden until accepted"
+                        ? "Hidden until accepted"
+                        : `
+                          <a
+                            href="tel:${escapeHTML(booking.customer_phone)}"
+                          >
+                            ${escapeHTML(booking.customer_phone)}
+                          </a>
+                        `
+                    }
+                  </p>
+                `
+                : ""
+            }
+
+            ${workerBookingActions(booking)}
+
+          </article>
+        `)
+        .join("")}
+
+    </div>
+  `;
 }
 
 
-function formatStatus(status) {
+// ============================================================
+// WORKER BOOKING ACTIONS
+// ============================================================
 
-  return String(status || "")
-    .replaceAll("_", " ")
-    .replace(
-      /\b\w/g,
-      letter =>
-        letter.toUpperCase()
+function workerBookingActions(
+  booking
+) {
+  if (
+    booking.status ===
+    "requested"
+  ) {
+    return `
+      <button
+        class="primary-btn"
+        onclick="acceptBooking(${Number(booking.id)})"
+      >
+        Accept Booking
+      </button>
+    `;
+  }
+
+  if (
+    booking.status ===
+    "accepted"
+  ) {
+    return `
+      <button
+        class="primary-btn"
+        onclick="startBooking(${Number(booking.id)})"
+      >
+        Start Job
+      </button>
+    `;
+  }
+
+  if (
+    booking.status ===
+    "in_progress"
+  ) {
+    return `
+      <div class="completion-box">
+
+        <label>
+          Enter customer's completion code
+        </label>
+
+        <input
+          id="completion-${Number(booking.id)}"
+          type="text"
+          inputmode="numeric"
+          maxlength="6"
+          placeholder="6 digit code"
+        >
+
+        <button
+          class="primary-btn"
+          onclick="completeBooking(${Number(booking.id)})"
+        >
+          Complete Job
+        </button>
+
+      </div>
+    `;
+  }
+
+  if (
+    booking.status ===
+    "completed"
+  ) {
+    return `
+      <div class="booking-warning">
+        ✓ Job completed and verified.
+      </div>
+    `;
+  }
+
+  return "";
+}
+
+
+// ============================================================
+// ACCEPT BOOKING
+// ============================================================
+
+async function acceptBooking(
+  bookingId
+) {
+  try {
+    const data =
+      await apiRequest(
+        `/bookings/${Number(bookingId)}/accept`,
+        {
+          method: "POST"
+        }
+      );
+
+    showPhoneDialog(
+      data.workerPhone
     );
 
-}
-
-
-function escapeHTML(value) {
-
-  return String(
-    value ?? ""
-  )
-    .replaceAll(
-      "&",
-      "&amp;"
-    )
-    .replaceAll(
-      "<",
-      "&lt;"
-    )
-    .replaceAll(
-      ">",
-      "&gt;"
-    )
-    .replaceAll(
-      '"',
-      "&quot;"
-    )
-    .replaceAll(
-      "'",
-      "&#039;"
+    showMessage(
+      "Booking accepted successfully.",
+      "success"
     );
 
+    await loadWorkerBookings();
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
 }
 
 
-function escapeAttribute(value) {
+// ============================================================
+// START BOOKING
+// ============================================================
 
-  return String(
-    value ?? ""
-  )
-    .replaceAll(
-      "\\",
-      "\\\\"
-    )
-    .replaceAll(
-      "'",
-      "\\'"
-    )
-    .replaceAll(
-      '"',
-      "&quot;"
+async function startBooking(
+  bookingId
+) {
+  try {
+    await apiRequest(
+      `/bookings/${Number(bookingId)}/start`,
+      {
+        method: "POST"
+      }
     );
 
+    showMessage(
+      "Job marked as started.",
+      "success"
+    );
+
+    await loadWorkerBookings();
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
 }
 
 
-// =====================================================
-// START APPLICATION
-// =====================================================
+// ============================================================
+// COMPLETE BOOKING
+// ============================================================
 
-render();
+async function completeBooking(
+  bookingId
+) {
+  const input =
+    document.getElementById(
+      `completion-${Number(bookingId)}`
+    );
+
+  const code =
+    String(input?.value || "")
+      .replace(/\D/g, "")
+      .slice(0, 6);
+
+  if (!/^[0-9]{6}$/.test(code)) {
+    showMessage(
+      "Enter the customer's 6 digit completion code.",
+      "error"
+    );
+
+    return;
+  }
+
+  try {
+    const data =
+      await apiRequest(
+        `/bookings/${Number(bookingId)}/complete`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            code
+          })
+        }
+      );
+
+    showMessage(
+      data.message ||
+      "Job completed successfully.",
+      "success"
+    );
+
+    await loadWorkerBookings();
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// WORKER NOTIFICATIONS
+// ============================================================
+
+async function loadWorkerNotifications() {
+  try {
+    const data =
+      await apiRequest(
+        "/notifications"
+      );
+
+    state.notifications =
+      Array.isArray(data.notifications)
+        ? data.notifications
+        : [];
+
+    renderWorkerNotifications();
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// RENDER WORKER NOTIFICATIONS
+// ============================================================
+
+function renderWorkerNotifications() {
+  const content =
+    document.getElementById(
+      "worker-content"
+    );
+
+  if (!content) {
+    return;
+  }
+
+  if (!state.notifications.length) {
+    content.innerHTML = `
+      <div class="empty-state">
+
+        <h3>
+          No notifications
+        </h3>
+
+      </div>
+    `;
+
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="section-heading">
+
+      <span class="eyebrow">
+        NOTIFICATIONS
+      </span>
+
+      <h3>
+        Updates
+      </h3>
+
+    </div>
+
+    <div class="notification-list">
+
+      ${state.notifications
+        .map(notification => `
+          <article class="notification-card">
+
+            <strong>
+              ${escapeHTML(notification.type)}
+            </strong>
+
+            <p>
+              ${escapeHTML(notification.message)}
+            </p>
+
+            <small>
+              ${escapeHTML(notification.created_at)}
+            </small>
+
+            ${
+              !notification.read
+                ? `
+                  <button
+                    class="secondary-btn"
+                    onclick="markWorkerNotificationRead(${Number(notification.id)})"
+                  >
+                    Mark as read
+                  </button>
+                `
+                : ""
+            }
+
+          </article>
+        `)
+        .join("")}
+
+    </div>
+  `;
+}
+
+
+// ============================================================
+// MARK WORKER NOTIFICATION READ
+// ============================================================
+
+async function markWorkerNotificationRead(
+  notificationId
+) {
+  try {
+    await apiRequest(
+      `/notifications/${Number(notificationId)}/read`,
+      {
+        method: "POST"
+      }
+    );
+
+    await loadWorkerNotifications();
+
+  } catch (error) {
+    showMessage(
+      error.message,
+      "error"
+    );
+  }
+}
+
+
+// ============================================================
+// AUTO LOAD
+// ============================================================
+
+document.addEventListener(
+  "DOMContentLoaded",
+  () => {
+
+    loadSession();
+
+    updateSessionUI();
+
+    if (state.user) {
+      renderApp();
+    }
+  }
+);
+
+
+// ============================================================
+// GLOBAL FUNCTIONS
+// ============================================================
+
+window.showAuth =
+  showAuth;
+
+window.requestOTP =
+  requestOTP;
+
+window.verifyOTP =
+  verifyOTP;
+
+window.selectRole =
+  selectRole;
+
+window.logout =
+  logout;
+
+window.selectService =
+  selectService;
+
+window.locate =
+  locate;
+
+window.findWorkersFromForm =
+  findWorkersFromForm;
+
+window.openBooking =
+  openBooking;
+
+window.createBooking =
+  createBooking;
+
+window.startOnlinePayment =
+  startOnlinePayment;
+
+window.loadMyBookings =
+  loadMyBookings;
+
+window.getWorkerContact =
+  getWorkerContact;
+
+window.loadNotifications =
+  loadNotifications;
+
+window.markNotificationRead =
+  markNotificationRead;
+
+window.renderCustomerDashboard =
+  renderCustomerDashboard;
+
+window.renderCustomerHome =
+  renderCustomerHome;
+
+window.renderWorkerDashboard =
+  renderWorkerDashboard;
+
+window.renderWorkerHome =
+  renderWorkerHome;
+
+window.renderWorkerProfile =
+  renderWorkerProfile;
+
+window.registerWorker =
+  registerWorker;
+
+window.updateWorkerLocation =
+  updateWorkerLocation;
+
+window.loadWorkerBookings =
+  loadWorkerBookings;
+
+window.acceptBooking =
+  acceptBooking;
+
+window.startBooking =
+  startBooking;
+
+window.completeBooking =
+  completeBooking;
+
+window.loadWorkerNotifications =
+  loadWorkerNotifications;
+
+window.markWorkerNotificationRead =
+  markWorkerNotificationRead;
