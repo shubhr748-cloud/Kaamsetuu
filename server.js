@@ -1,5 +1,5 @@
 // ============================================================
-// KAAMSETU - FINAL MVP BACKEND
+// KAAMSETU - PRODUCTION MVP BACKEND
 // ============================================================
 
 const express = require("express");
@@ -12,21 +12,48 @@ const crypto = require("crypto");
 
 const app = express();
 
-const PORT = process.env.PORT || 10000;
-const ADMIN_KEY = process.env.ADMIN_KEY || "";
+const PORT = Number(process.env.PORT || 10000);
 
-const PLATFORM_FEE_PERCENT =
-  Number(process.env.PLATFORM_FEE_PERCENT || 10);
+const ADMIN_KEY = String(process.env.ADMIN_KEY || "");
 
-const OTP_EXPIRY_MINUTES =
-  Number(process.env.OTP_EXPIRY_MINUTES || 5);
+const PLATFORM_FEE_PERCENT = Number(
+  process.env.PLATFORM_FEE_PERCENT || 10
+);
 
-const MAX_BOOKING_RADIUS_KM =
-  Number(process.env.MAX_BOOKING_RADIUS_KM || 50);
+const FIRST_BOOKING_FREE = String(
+  process.env.FIRST_BOOKING_FREE || "true"
+).toLowerCase() === "true";
 
+const LOYALTY_COMPLETED_BOOKINGS = Number(
+  process.env.LOYALTY_COMPLETED_BOOKINGS || 10
+);
+
+const LOYALTY_DISCOUNT_PERCENT = Number(
+  process.env.LOYALTY_DISCOUNT_PERCENT || 20
+);
+
+const MAX_BOOKING_RADIUS_KM = Number(
+  process.env.MAX_BOOKING_RADIUS_KM || 50
+);
+
+const OTP_EXPIRY_MINUTES = Number(
+  process.env.OTP_EXPIRY_MINUTES || 5
+);
+
+const COMPLETION_CODE_EXPIRY_MINUTES = Number(
+  process.env.COMPLETION_CODE_EXPIRY_MINUTES || 180
+);
+
+const JWT_SECRET = String(
+  process.env.JWT_SECRET || crypto.randomBytes(32).toString("hex")
+);
+
+const SESSION_EXPIRY_DAYS = Number(
+  process.env.SESSION_EXPIRY_DAYS || 30
+);
 
 // ============================================================
-// SECURITY / MIDDLEWARE
+// APP SECURITY
 // ============================================================
 
 app.disable("x-powered-by");
@@ -63,7 +90,7 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: "Too many requests. Please try again later."
+    error: "Too many authentication requests."
   }
 });
 
@@ -75,7 +102,6 @@ const apiLimiter = rateLimit({
 });
 
 app.use("/api", apiLimiter);
-
 
 // ============================================================
 // DATABASE
@@ -90,149 +116,259 @@ const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
-
 // ============================================================
-// DATABASE TABLES
+// DATABASE
 // ============================================================
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone TEXT NOT NULL UNIQUE,
-    role TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone TEXT NOT NULL UNIQUE,
+  role TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
-  CREATE TABLE IF NOT EXISTS otp_codes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone TEXT NOT NULL,
-    otp_hash TEXT NOT NULL,
-    expires_at INTEGER NOT NULL,
-    attempts INTEGER NOT NULL DEFAULT 0,
-    used INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id)
+    REFERENCES users(id)
+    ON DELETE CASCADE
+);
 
-  CREATE TABLE IF NOT EXISTS workers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    category TEXT NOT NULL,
-    skills TEXT,
-    experience INTEGER NOT NULL DEFAULT 0,
-    rate REAL NOT NULL DEFAULT 0,
-    bio TEXT,
-    lat REAL,
-    lng REAL,
-    rating REAL NOT NULL DEFAULT 5,
-    approved INTEGER NOT NULL DEFAULT 0,
-    available INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id)
-      REFERENCES users(id)
-      ON DELETE CASCADE
-  );
+CREATE TABLE IF NOT EXISTS otp_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone TEXT NOT NULL,
+  otp_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  used INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
-  CREATE TABLE IF NOT EXISTS bookings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS workers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL,
+  skills TEXT,
+  experience INTEGER NOT NULL DEFAULT 0,
+  rate REAL NOT NULL DEFAULT 0,
+  bio TEXT,
 
-    customer_id INTEGER NOT NULL,
-    worker_id INTEGER NOT NULL,
+  lat REAL,
+  lng REAL,
 
-    category TEXT NOT NULL,
-    description TEXT NOT NULL,
-    address TEXT NOT NULL,
+  rating REAL NOT NULL DEFAULT 5,
 
-    lat REAL,
-    lng REAL,
+  approved INTEGER NOT NULL DEFAULT 0,
+  verified INTEGER NOT NULL DEFAULT 0,
+  available INTEGER NOT NULL DEFAULT 1,
 
-    duration TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    worker_price REAL NOT NULL DEFAULT 0,
-    platform_fee REAL NOT NULL DEFAULT 0,
-    customer_total REAL NOT NULL DEFAULT 0,
+  FOREIGN KEY(user_id)
+    REFERENCES users(id)
+    ON DELETE CASCADE
+);
 
-    payment_method TEXT NOT NULL DEFAULT 'cash',
-    payment_status TEXT NOT NULL DEFAULT 'pending',
+CREATE TABLE IF NOT EXISTS bookings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    worker_fee_status TEXT NOT NULL DEFAULT 'pending',
+  customer_id INTEGER NOT NULL,
+  worker_id INTEGER NOT NULL,
 
-    status TEXT NOT NULL DEFAULT 'requested',
+  category TEXT NOT NULL,
+  description TEXT NOT NULL,
+  address TEXT NOT NULL,
 
-    completion_code_hash TEXT,
-    completion_code_verified INTEGER NOT NULL DEFAULT 0,
+  lat REAL,
+  lng REAL,
 
-    worker_phone_revealed INTEGER NOT NULL DEFAULT 0,
+  duration TEXT NOT NULL,
 
-    accepted_at TEXT,
-    started_at TEXT,
-    completed_at TEXT,
-    cancelled_at TEXT,
+  worker_price REAL NOT NULL DEFAULT 0,
+  platform_fee REAL NOT NULL DEFAULT 0,
+  discount REAL NOT NULL DEFAULT 0,
+  customer_total REAL NOT NULL DEFAULT 0,
 
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  payment_method TEXT NOT NULL DEFAULT 'cash',
+  payment_status TEXT NOT NULL DEFAULT 'pending',
 
-    FOREIGN KEY (customer_id)
-      REFERENCES users(id),
+  worker_fee_status TEXT NOT NULL DEFAULT 'pending',
 
-    FOREIGN KEY (worker_id)
-      REFERENCES workers(id)
-  );
+  status TEXT NOT NULL DEFAULT 'requested',
 
-  CREATE TABLE IF NOT EXISTS notifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    type TEXT NOT NULL,
-    message TEXT NOT NULL,
-    booking_id INTEGER,
-    read INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completion_code_hash TEXT,
+  completion_code_expires_at INTEGER,
+  completion_code_verified INTEGER NOT NULL DEFAULT 0,
 
-    FOREIGN KEY (user_id)
-      REFERENCES users(id)
-      ON DELETE CASCADE
-  );
+  worker_phone_revealed INTEGER NOT NULL DEFAULT 0,
 
-  CREATE TABLE IF NOT EXISTS worker_ledger (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    worker_id INTEGER NOT NULL,
-    booking_id INTEGER,
-    type TEXT NOT NULL,
-    amount REAL NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    description TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  accepted_at TEXT,
+  started_at TEXT,
+  completed_at TEXT,
+  cancelled_at TEXT,
 
-    FOREIGN KEY (worker_id)
-      REFERENCES workers(id)
-      ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    FOREIGN KEY (booking_id)
-      REFERENCES bookings(id)
-      ON DELETE SET NULL
-  );
+  FOREIGN KEY(customer_id)
+    REFERENCES users(id),
 
-  CREATE INDEX IF NOT EXISTS idx_workers_category
-    ON workers(category);
+  FOREIGN KEY(worker_id)
+    REFERENCES workers(id)
+);
 
-  CREATE INDEX IF NOT EXISTS idx_workers_location
-    ON workers(lat, lng);
+CREATE TABLE IF NOT EXISTS worker_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-  CREATE INDEX IF NOT EXISTS idx_bookings_customer
-    ON bookings(customer_id);
+  worker_id INTEGER NOT NULL,
+  booking_id INTEGER,
 
-  CREATE INDEX IF NOT EXISTS idx_bookings_worker
-    ON bookings(worker_id);
+  type TEXT NOT NULL,
 
-  CREATE INDEX IF NOT EXISTS idx_notifications_user
-    ON notifications(user_id);
+  amount REAL NOT NULL,
+
+  status TEXT NOT NULL DEFAULT 'pending',
+
+  description TEXT,
+
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY(worker_id)
+    REFERENCES workers(id)
+    ON DELETE CASCADE,
+
+  FOREIGN KEY(booking_id)
+    REFERENCES bookings(id)
+    ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+  user_id INTEGER NOT NULL,
+
+  type TEXT NOT NULL,
+
+  message TEXT NOT NULL,
+
+  booking_id INTEGER,
+
+  read INTEGER NOT NULL DEFAULT 0,
+
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY(user_id)
+    REFERENCES users(id)
+    ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS payment_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+  booking_id INTEGER NOT NULL UNIQUE,
+
+  provider TEXT NOT NULL DEFAULT 'razorpay',
+
+  provider_order_id TEXT,
+
+  amount REAL NOT NULL,
+
+  currency TEXT NOT NULL DEFAULT 'INR',
+
+  status TEXT NOT NULL DEFAULT 'created',
+
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY(booking_id)
+    REFERENCES bookings(id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_workers_category
+ON workers(category);
+
+CREATE INDEX IF NOT EXISTS idx_workers_location
+ON workers(lat, lng);
+
+CREATE INDEX IF NOT EXISTS idx_workers_available
+ON workers(available, approved);
+
+CREATE INDEX IF NOT EXISTS idx_bookings_customer
+ON bookings(customer_id);
+
+CREATE INDEX IF NOT EXISTS idx_bookings_worker
+ON bookings(worker_id);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_token
+ON sessions(token_hash);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user
+ON notifications(user_id);
 `);
 
+// ============================================================
+// DATABASE MIGRATION SAFETY
+// ============================================================
+
+function ensureColumn(table, column, definition) {
+  const columns = db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all();
+
+  const exists = columns.some(
+    c => c.name === column
+  );
+
+  if (!exists) {
+    db.exec(
+      `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`
+    );
+  }
+}
+
+ensureColumn("workers", "verified", "INTEGER NOT NULL DEFAULT 0");
+
+ensureColumn(
+  "bookings",
+  "discount",
+  "REAL NOT NULL DEFAULT 0"
+);
+
+ensureColumn(
+  "bookings",
+  "completion_code_expires_at",
+  "INTEGER"
+);
+
+ensureColumn(
+  "bookings",
+  "completion_code_verified",
+  "INTEGER NOT NULL DEFAULT 0"
+);
+
+ensureColumn(
+  "bookings",
+  "worker_phone_revealed",
+  "INTEGER NOT NULL DEFAULT 0"
+);
 
 // ============================================================
 // HELPERS
 // ============================================================
+
+function cleanString(value, max = 1000) {
+  return String(value ?? "")
+    .trim()
+    .slice(0, max);
+}
 
 function normalizePhone(phone) {
   return String(phone || "")
@@ -242,12 +378,6 @@ function normalizePhone(phone) {
 
 function validPhone(phone) {
   return /^[0-9]{10}$/.test(phone);
-}
-
-function cleanString(value, max = 1000) {
-  return String(value ?? "")
-    .trim()
-    .slice(0, max);
 }
 
 function validNumber(value) {
@@ -284,6 +414,17 @@ function hashValue(value) {
     .digest("hex");
 }
 
+function safeEqual(a, b) {
+  const aa = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+
+  if (aa.length !== bb.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(aa, bb);
+}
+
 function generateOTP() {
   return String(
     crypto.randomInt(100000, 1000000)
@@ -293,22 +434,6 @@ function generateOTP() {
 function generateCompletionCode() {
   return String(
     crypto.randomInt(100000, 1000000)
-  );
-}
-
-function calculatePlatformFee(workerPrice) {
-  return roundMoney(
-    Number(workerPrice) *
-      (PLATFORM_FEE_PERCENT / 100)
-  );
-}
-
-function calculateTotal(workerPrice) {
-  const fee =
-    calculatePlatformFee(workerPrice);
-
-  return roundMoney(
-    Number(workerPrice) + fee
   );
 }
 
@@ -336,15 +461,116 @@ function haversineDistance(
       ) *
       Math.sin(dLng / 2) ** 2;
 
-  const c =
+  return (
+    R *
     2 *
     Math.atan2(
       Math.sqrt(a),
       Math.sqrt(1 - a)
+    )
+  );
+}
+
+// ============================================================
+// PRICING
+// ============================================================
+
+function calculatePlatformFee(workerPrice) {
+  return roundMoney(
+    Number(workerPrice) *
+      (PLATFORM_FEE_PERCENT / 100)
+  );
+}
+
+function getCompletedBookingCount(customerId) {
+  return db
+    .prepare(`
+      SELECT COUNT(*) AS count
+      FROM bookings
+      WHERE customer_id = ?
+        AND status = 'completed'
+    `)
+    .get(customerId).count;
+}
+
+function calculateDiscount(
+  customerId,
+  workerPrice
+) {
+  const completed =
+    getCompletedBookingCount(
+      customerId
     );
 
-  return R * c;
+  if (
+    completed > 0 &&
+    completed % LOYALTY_COMPLETED_BOOKINGS === 0
+  ) {
+    return roundMoney(
+      Number(workerPrice) *
+        (LOYALTY_DISCOUNT_PERCENT / 100)
+    );
+  }
+
+  return 0;
 }
+
+function calculateBookingPricing(
+  customerId,
+  workerPrice
+) {
+  const completed =
+    getCompletedBookingCount(
+      customerId
+    );
+
+  let platformFee =
+    calculatePlatformFee(
+      workerPrice
+    );
+
+  let discount = 0;
+
+  // First booking platform-fee benefit
+  if (
+    FIRST_BOOKING_FREE &&
+    completed === 0
+  ) {
+    platformFee = 0;
+  }
+
+  // Every 10 completed services:
+  // next eligible booking gets discount.
+  if (
+    completed > 0 &&
+    completed % LOYALTY_COMPLETED_BOOKINGS === 0
+  ) {
+    discount =
+      roundMoney(
+        Number(workerPrice) *
+          (LOYALTY_DISCOUNT_PERCENT / 100)
+      );
+  }
+
+  const customerTotal =
+    roundMoney(
+      Number(workerPrice) +
+        platformFee -
+        discount
+    );
+
+  return {
+    workerPrice: roundMoney(workerPrice),
+    platformFee,
+    discount,
+    customerTotal,
+    completedBookings: completed
+  };
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
 
 function addNotification(
   userId,
@@ -369,22 +595,82 @@ function addNotification(
   );
 }
 
+// ============================================================
+// AUTHENTICATION
+// ============================================================
+
+function createSession(userId) {
+  const token =
+    crypto.randomBytes(48).toString("hex");
+
+  const tokenHash =
+    hashValue(token);
+
+  const expiresAt =
+    Date.now() +
+    SESSION_EXPIRY_DAYS *
+      24 *
+      60 *
+      60 *
+      1000;
+
+  db.prepare(`
+    INSERT INTO sessions
+    (
+      user_id,
+      token_hash,
+      expires_at
+    )
+    VALUES (?, ?, ?)
+  `).run(
+    userId,
+    tokenHash,
+    expiresAt
+  );
+
+  return token;
+}
+
 function getUserFromRequest(req) {
-  const id =
-    Number(req.headers["x-user-id"]);
+  const auth =
+    String(
+      req.headers.authorization || ""
+    );
 
   if (
-    !Number.isInteger(id) ||
-    id <= 0
+    !auth.startsWith("Bearer ")
   ) {
     return null;
   }
 
-  return db.prepare(`
-    SELECT *
-    FROM users
-    WHERE id = ?
-  `).get(id);
+  const token =
+    auth.slice(7).trim();
+
+  if (!token) {
+    return null;
+  }
+
+  const tokenHash =
+    hashValue(token);
+
+  const session =
+    db.prepare(`
+      SELECT
+        s.*,
+        u.id AS user_id,
+        u.phone,
+        u.role
+      FROM sessions s
+      JOIN users u
+        ON u.id = s.user_id
+      WHERE s.token_hash = ?
+        AND s.expires_at > ?
+    `).get(
+      tokenHash,
+      Date.now()
+    );
+
+  return session || null;
 }
 
 function requireUser(req, res, next) {
@@ -393,7 +679,8 @@ function requireUser(req, res, next) {
 
   if (!user) {
     return res.status(401).json({
-      error: "Login required."
+      error:
+        "Login required."
     });
   }
 
@@ -403,16 +690,24 @@ function requireUser(req, res, next) {
 }
 
 function requireRole(role) {
-  return (req, res, next) => {
+  return (
+    req,
+    res,
+    next
+  ) => {
     if (!req.user) {
       return res.status(401).json({
-        error: "Login required."
+        error:
+          "Login required."
       });
     }
 
-    if (req.user.role !== role) {
+    if (
+      req.user.role !== role
+    ) {
       return res.status(403).json({
-        error: "Access denied."
+        error:
+          "Access denied."
       });
     }
 
@@ -421,12 +716,21 @@ function requireRole(role) {
 }
 
 function requireAdmin(req, res, next) {
+  const supplied =
+    String(
+      req.headers["x-admin-key"] || ""
+    );
+
   if (
     !ADMIN_KEY ||
-    req.headers["x-admin-key"] !== ADMIN_KEY
+    !safeEqual(
+      supplied,
+      ADMIN_KEY
+    )
   ) {
     return res.status(403).json({
-      error: "Admin access denied."
+      error:
+        "Admin access denied."
     });
   }
 
@@ -434,14 +738,19 @@ function requireAdmin(req, res, next) {
 }
 
 function getWorkerByUserId(userId) {
-  return db.prepare(`
-    SELECT *
-    FROM workers
-    WHERE user_id = ?
-  `).get(userId);
+  return db
+    .prepare(`
+      SELECT *
+      FROM workers
+      WHERE user_id = ?
+    `)
+    .get(userId);
 }
 
-function publicWorker(worker, distanceKm = null) {
+function publicWorker(
+  worker,
+  distanceKm = null
+) {
   return {
     id: worker.id,
     name: worker.name,
@@ -451,8 +760,16 @@ function publicWorker(worker, distanceKm = null) {
     rate: worker.rate,
     bio: worker.bio,
     rating: worker.rating,
-    approved: Boolean(worker.approved),
-    available: Boolean(worker.available),
+
+    approved:
+      Boolean(worker.approved),
+
+    verified:
+      Boolean(worker.verified),
+
+    available:
+      Boolean(worker.available),
+
     distanceKm:
       distanceKm === null
         ? null
@@ -460,22 +777,25 @@ function publicWorker(worker, distanceKm = null) {
   };
 }
 
+// ============================================================
+// HEALTH
+// ============================================================
+
+app.get(
+  "/api/health",
+  (req, res) => {
+    res.json({
+      ok: true,
+      service: "KaamSetu",
+      version: "1.0.0",
+      time:
+        new Date().toISOString()
+    });
+  }
+);
 
 // ============================================================
-// HEALTH CHECK
-// ============================================================
-
-app.get("/api/health", (req, res) => {
-  res.json({
-    ok: true,
-    service: "KaamSetu",
-    time: new Date().toISOString()
-  });
-});
-
-
-// ============================================================
-// AUTH - SEND OTP
+// SEND OTP
 // ============================================================
 
 app.post(
@@ -483,7 +803,9 @@ app.post(
   authLimiter,
   (req, res) => {
     const phone =
-      normalizePhone(req.body.phone);
+      normalizePhone(
+        req.body.phone
+      );
 
     if (!validPhone(phone)) {
       return res.status(400).json({
@@ -525,21 +847,23 @@ app.post(
       expiresAt
     );
 
-    // ========================================================
-    // DEVELOPMENT MODE
-    // ========================================================
-    // Real SMS provider can be connected later.
-    //
-    // Never expose OTP in production.
-    // ========================================================
+    /*
+      Production:
+      Connect an SMS provider here.
+
+      Development:
+      demoOtp is returned only outside production.
+    */
 
     const response = {
+      success: true,
       message:
-        "OTP generated successfully."
+        "OTP sent successfully."
     };
 
     if (
-      process.env.NODE_ENV !== "production"
+      process.env.NODE_ENV !==
+      "production"
     ) {
       response.demoOtp = otp;
     }
@@ -552,9 +876,8 @@ app.post(
   }
 );
 
-
 // ============================================================
-// AUTH - VERIFY OTP
+// VERIFY OTP
 // ============================================================
 
 app.post(
@@ -562,20 +885,29 @@ app.post(
   authLimiter,
   (req, res) => {
     const phone =
-      normalizePhone(req.body.phone);
+      normalizePhone(
+        req.body.phone
+      );
 
     const otp =
-      cleanString(req.body.otp, 6);
+      cleanString(
+        req.body.otp,
+        6
+      );
 
     if (!validPhone(phone)) {
       return res.status(400).json({
-        error: "Invalid phone number."
+        error:
+          "Invalid phone number."
       });
     }
 
-    if (!/^[0-9]{6}$/.test(otp)) {
+    if (
+      !/^[0-9]{6}$/.test(otp)
+    ) {
       return res.status(400).json({
-        error: "Invalid OTP."
+        error:
+          "Invalid OTP."
       });
     }
 
@@ -592,20 +924,23 @@ app.post(
     if (!record) {
       return res.status(400).json({
         error:
-          "OTP not found. Please request a new OTP."
+          "OTP not found. Request a new OTP."
       });
     }
 
     if (
-      Date.now() > record.expires_at
+      Date.now() >
+      record.expires_at
     ) {
       return res.status(400).json({
         error:
-          "OTP expired. Please request a new OTP."
+          "OTP expired."
       });
     }
 
-    if (record.attempts >= 5) {
+    if (
+      record.attempts >= 5
+    ) {
       return res.status(429).json({
         error:
           "Too many OTP attempts."
@@ -619,11 +954,14 @@ app.post(
     `).run(record.id);
 
     if (
-      hashValue(otp) !==
-      record.otp_hash
+      !safeEqual(
+        hashValue(otp),
+        record.otp_hash
+      )
     ) {
       return res.status(400).json({
-        error: "Incorrect OTP."
+        error:
+          "Incorrect OTP."
       });
     }
 
@@ -643,8 +981,8 @@ app.post(
     if (!user) {
       const result =
         db.prepare(`
-          INSERT INTO users (phone)
-          VALUES (?)
+          INSERT INTO users(phone)
+          VALUES(?)
         `).run(phone);
 
       user =
@@ -652,10 +990,19 @@ app.post(
           SELECT *
           FROM users
           WHERE id = ?
-        `).get(result.lastInsertRowid);
+        `).get(
+          result.lastInsertRowid
+        );
     }
 
+    const token =
+      createSession(user.id);
+
     res.json({
+      success: true,
+
+      token,
+
       user: {
         id: user.id,
         phone: user.phone,
@@ -665,9 +1012,41 @@ app.post(
   }
 );
 
+// ============================================================
+// LOGOUT
+// ============================================================
+
+app.post(
+  "/api/auth/logout",
+  requireUser,
+  (req, res) => {
+    const auth =
+      String(
+        req.headers.authorization || ""
+      );
+
+    const token =
+      auth.startsWith("Bearer ")
+        ? auth.slice(7).trim()
+        : "";
+
+    if (token) {
+      db.prepare(`
+        DELETE FROM sessions
+        WHERE token_hash = ?
+      `).run(
+        hashValue(token)
+      );
+    }
+
+    res.json({
+      success: true
+    });
+  }
+);
 
 // ============================================================
-// AUTH - SELECT ROLE
+// SELECT ROLE
 // ============================================================
 
 app.post(
@@ -675,8 +1054,10 @@ app.post(
   requireUser,
   (req, res) => {
     const role =
-      cleanString(req.body.role, 20)
-        .toLowerCase();
+      cleanString(
+        req.body.role,
+        20
+      ).toLowerCase();
 
     if (
       role !== "customer" &&
@@ -714,9 +1095,26 @@ app.post(
   }
 );
 
+// ============================================================
+// CURRENT USER
+// ============================================================
+
+app.get(
+  "/api/auth/me",
+  requireUser,
+  (req, res) => {
+    res.json({
+      user: {
+        id: req.user.user_id,
+        phone: req.user.phone,
+        role: req.user.role
+      }
+    });
+  }
+);
 
 // ============================================================
-// WORKER REGISTER / UPDATE PROFILE
+// WORKER REGISTER
 // ============================================================
 
 app.post(
@@ -725,13 +1123,22 @@ app.post(
   requireRole("worker"),
   (req, res) => {
     const name =
-      cleanString(req.body.name, 100);
+      cleanString(
+        req.body.name,
+        100
+      );
 
     const category =
-      cleanString(req.body.category, 80);
+      cleanString(
+        req.body.category,
+        80
+      );
 
     const skills =
-      cleanString(req.body.skills, 500);
+      cleanString(
+        req.body.skills,
+        500
+      );
 
     const experience =
       clampNumber(
@@ -748,7 +1155,10 @@ app.post(
       );
 
     const bio =
-      cleanString(req.body.bio, 1000);
+      cleanString(
+        req.body.bio,
+        1000
+      );
 
     const lat =
       validNumber(req.body.lat)
@@ -770,7 +1180,8 @@ app.post(
 
     if (!name) {
       return res.status(400).json({
-        error: "Name is required."
+        error:
+          "Name is required."
       });
     }
 
@@ -793,11 +1204,10 @@ app.post(
 
     const existing =
       getWorkerByUserId(
-        req.user.id
+        req.user.user_id
       );
 
     if (existing) {
-
       db.prepare(`
         UPDATE workers
         SET
@@ -820,7 +1230,7 @@ app.post(
         bio,
         lat,
         lng,
-        req.user.id
+        req.user.user_id
       );
 
       return res.json({
@@ -830,7 +1240,9 @@ app.post(
             ? "Profile updated successfully."
             : "Profile updated. Admin approval is required.",
         approved:
-          Boolean(existing.approved)
+          Boolean(existing.approved),
+        verified:
+          Boolean(existing.verified)
       });
     }
 
@@ -849,7 +1261,7 @@ app.post(
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      req.user.id,
+      req.user.user_id,
       name,
       category,
       skills,
@@ -860,18 +1272,18 @@ app.post(
       lng
     );
 
-    res.json({
+    res.status(201).json({
       success: true,
       message:
-        "Profile submitted successfully. Admin approval is required.",
-      approved: false
+        "Worker profile submitted for approval.",
+      approved: false,
+      verified: false
     });
   }
 );
 
-
 // ============================================================
-// WORKER GPS
+// WORKER LOCATION
 // ============================================================
 
 app.post(
@@ -879,7 +1291,6 @@ app.post(
   requireUser,
   requireRole("worker"),
   (req, res) => {
-
     const lat =
       clampNumber(
         req.body.lat,
@@ -906,13 +1317,13 @@ app.post(
 
     const worker =
       getWorkerByUserId(
-        req.user.id
+        req.user.user_id
       );
 
     if (!worker) {
       return res.status(404).json({
         error:
-          "Please create your worker profile first."
+          "Worker profile not found."
       });
     }
 
@@ -922,21 +1333,100 @@ app.post(
         lat = ?,
         lng = ?,
         updated_at = CURRENT_TIMESTAMP
-      WHERE user_id = ?
+      WHERE id = ?
     `).run(
       lat,
       lng,
-      req.user.id
+      worker.id
     );
 
     res.json({
       success: true,
-      message:
-        "GPS location updated successfully."
+      lat,
+      lng
     });
   }
 );
 
+// ============================================================
+// WORKER AVAILABILITY
+// ============================================================
+
+app.post(
+  "/api/workers/availability",
+  requireUser,
+  requireRole("worker"),
+  (req, res) => {
+    const worker =
+      getWorkerByUserId(
+        req.user.user_id
+      );
+
+    if (!worker) {
+      return res.status(404).json({
+        error:
+          "Worker profile not found."
+      });
+    }
+
+    const available =
+      req.body.available === true ||
+      String(
+        req.body.available
+      ).toLowerCase() === "true";
+
+    if (!worker.approved) {
+      return res.status(403).json({
+        error:
+          "Worker is not approved."
+      });
+    }
+
+    db.prepare(`
+      UPDATE workers
+      SET
+        available = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      available ? 1 : 0,
+      worker.id
+    );
+
+    res.json({
+      success: true,
+      available
+    });
+  }
+);
+
+// ============================================================
+// WORKER PROFILE
+// ============================================================
+
+app.get(
+  "/api/workers/me",
+  requireUser,
+  requireRole("worker"),
+  (req, res) => {
+    const worker =
+      getWorkerByUserId(
+        req.user.user_id
+      );
+
+    if (!worker) {
+      return res.status(404).json({
+        error:
+          "Worker profile not found."
+      });
+    }
+
+    res.json({
+      worker:
+        publicWorker(worker)
+    });
+  }
+);
 
 // ============================================================
 // NEARBY WORKERS
@@ -947,7 +1437,6 @@ app.get(
   requireUser,
   requireRole("customer"),
   (req, res) => {
-
     const lat =
       clampNumber(
         req.query.lat,
@@ -985,19 +1474,30 @@ app.get(
       });
     }
 
-    // --------------------------------------------------------
-    // GPS PRIORITY:
-    //
-    // 10 km first
-    // If workers found -> STOP
-    //
-    // Otherwise 15 km
-    // Otherwise 20 km
-    // Otherwise 25 km...
-    //
-    // Once workers are found in the first successful range,
-    // workers from farther ranges are NOT mixed into results.
-    // --------------------------------------------------------
+    /*
+      GPS BUSINESS RULE:
+
+      10 km
+      ↓
+      15 km
+      ↓
+      20 km
+      ↓
+      25 km
+      ↓
+      30 km
+      ↓
+      35 km
+      ↓
+      40 km
+      ↓
+      45 km
+      ↓
+      50 km
+
+      Once a successful range is found,
+      farther workers are NOT mixed.
+    */
 
     const ranges = [
       10,
@@ -1011,70 +1511,54 @@ app.get(
       50
     ];
 
-    const requestedRadius =
-      clampNumber(
-        req.query.radius,
-        1,
-        MAX_BOOKING_RADIUS_KM
-      );
-
-    let maxRange =
-      requestedRadius || 10;
-
-    maxRange =
+    const maxRange =
       Math.min(
-        maxRange,
+        Math.max(
+          Number(
+            req.query.maxRadius ||
+            MAX_BOOKING_RADIUS_KM
+          ),
+          10
+        ),
         MAX_BOOKING_RADIUS_KM
       );
 
     const selectedRanges =
       ranges.filter(
-        range => range <= maxRange
+        r => r <= maxRange
       );
-
-    if (
-      selectedRanges.length === 0
-    ) {
-      selectedRanges.push(10);
-    }
 
     const workers =
       db.prepare(`
         SELECT *
         FROM workers
-        WHERE category = ?
+        WHERE LOWER(category) = LOWER(?)
           AND approved = 1
           AND available = 1
           AND lat IS NOT NULL
           AND lng IS NOT NULL
       `).all(category);
 
-    let selectedWorkers = [];
+    let selected = [];
 
     for (
       const radius of selectedRanges
     ) {
-
       const matches =
         workers
-          .map(worker => {
-
-            const distance =
+          .map(worker => ({
+            worker,
+            distance:
               haversineDistance(
                 lat,
                 lng,
                 Number(worker.lat),
                 Number(worker.lng)
-              );
-
-            return {
-              worker,
-              distance
-            };
-          })
+              )
+          }))
           .filter(
-            item =>
-              item.distance <= radius
+            x =>
+              x.distance <= radius
           )
           .sort(
             (a, b) =>
@@ -1083,26 +1567,77 @@ app.get(
           );
 
       if (matches.length) {
-
-        selectedWorkers =
+        selected =
           matches.map(
-            item =>
+            x =>
               publicWorker(
-                item.worker,
-                item.distance
+                x.worker,
+                x.distance
               )
           );
 
-        break;
+        return res.json({
+          workers: selected,
+          searchRadiusKm: radius
+        });
       }
     }
 
     res.json({
-      workers: selectedWorkers
+      workers: [],
+      searchRadiusKm: maxRange
     });
   }
 );
 
+// ============================================================
+// PRICE PREVIEW
+// ============================================================
+
+app.get(
+  "/api/bookings/price-preview",
+  requireUser,
+  requireRole("customer"),
+  (req, res) => {
+    const workerId =
+      Number(req.query.workerId);
+
+    if (
+      !Number.isInteger(workerId) ||
+      workerId <= 0
+    ) {
+      return res.status(400).json({
+        error:
+          "Invalid worker."
+      });
+    }
+
+    const worker =
+      db.prepare(`
+        SELECT *
+        FROM workers
+        WHERE id = ?
+          AND approved = 1
+      `).get(workerId);
+
+    if (!worker) {
+      return res.status(404).json({
+        error:
+          "Worker not found."
+      });
+    }
+
+    const pricing =
+      calculateBookingPricing(
+        req.user.user_id,
+        worker.rate
+      );
+
+    res.json({
+      pricing
+    });
+  }
+);
 
 // ============================================================
 // CREATE BOOKING
@@ -1113,7 +1648,6 @@ app.post(
   requireUser,
   requireRole("customer"),
   (req, res) => {
-
     const workerId =
       Number(req.body.workerId);
 
@@ -1233,17 +1767,27 @@ app.post(
       });
     }
 
+    if (
+      worker.user_id ===
+      req.user.user_id
+    ) {
+      return res.status(400).json({
+        error:
+          "You cannot book yourself."
+      });
+    }
+
     if (!worker.approved) {
       return res.status(400).json({
         error:
-          "This worker is not approved."
+          "Worker is not approved."
       });
     }
 
     if (!worker.available) {
       return res.status(400).json({
         error:
-          "This worker is currently unavailable."
+          "Worker is currently unavailable."
       });
     }
 
@@ -1257,32 +1801,12 @@ app.post(
       });
     }
 
-    // --------------------------------------------------------
-    // SERVER-SIDE PRICE
-    // NEVER TRUST FRONTEND RATE.
-    // --------------------------------------------------------
-
-    const workerPrice =
-      roundMoney(worker.rate);
-
-    const platformFee =
-      calculatePlatformFee(
-        workerPrice
+    // Server-side pricing
+    const pricing =
+      calculateBookingPricing(
+        req.user.user_id,
+        worker.rate
       );
-
-    const customerTotal =
-      roundMoney(
-        workerPrice +
-        platformFee
-      );
-
-    // --------------------------------------------------------
-    // COMPLETION CODE
-    // Generated on booking creation.
-    // Stored only as hash.
-    // Customer will know the code.
-    // Worker must obtain it from customer at job completion.
-    // --------------------------------------------------------
 
     const completionCode =
       generateCompletionCode();
@@ -1292,89 +1816,139 @@ app.post(
         completionCode
       );
 
-    // --------------------------------------------------------
-    // CUSTOMER PHONE MUST NOT BE PUBLIC.
-    // WORKER PHONE WILL BE REVEALED ONLY AFTER ACCEPTANCE.
-    // --------------------------------------------------------
+    const codeExpiry =
+      Date.now() +
+      COMPLETION_CODE_EXPIRY_MINUTES *
+        60 *
+        1000;
 
-    const result =
-      db.prepare(`
-        INSERT INTO bookings
-        (
-          customer_id,
-          worker_id,
-          category,
-          description,
-          address,
-          lat,
-          lng,
-          duration,
-          worker_price,
-          platform_fee,
-          customer_total,
-          payment_method,
-          payment_status,
-          worker_fee_status,
-          status,
-          completion_code_hash
-        )
-        VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        req.user.id,
-        workerId,
-        category,
-        description,
-        address,
-        customerLat,
-        customerLng,
-        duration,
-        workerPrice,
-        platformFee,
-        customerTotal,
-        paymentMethod,
-        paymentMethod === "online"
-          ? "pending"
-          : "cash_pending",
-        "pending",
-        "requested",
-        completionHash
-      );
+    const paymentStatus =
+      paymentMethod === "online"
+        ? "pending"
+        : "cash_pending";
+
+    const transaction =
+      db.transaction(() => {
+        const result =
+          db.prepare(`
+            INSERT INTO bookings
+            (
+              customer_id,
+              worker_id,
+              category,
+              description,
+              address,
+              lat,
+              lng,
+              duration,
+
+              worker_price,
+              platform_fee,
+              discount,
+              customer_total,
+
+              payment_method,
+              payment_status,
+              worker_fee_status,
+
+              status,
+
+              completion_code_hash,
+              completion_code_expires_at
+            )
+            VALUES
+            (?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?,
+             ?, ?, ?,
+             'requested',
+             ?, ?)
+          `).run(
+            req.user.user_id,
+            workerId,
+            category,
+            description,
+            address,
+            customerLat,
+            customerLng,
+            duration,
+
+            pricing.workerPrice,
+            pricing.platformFee,
+            pricing.discount,
+            pricing.customerTotal,
+
+            paymentMethod,
+            paymentStatus,
+            "pending",
+
+            completionHash,
+            codeExpiry
+          );
+
+        const bookingId =
+          Number(
+            result.lastInsertRowid
+          );
+
+        addNotification(
+          worker.user_id,
+          "booking_request",
+          `New ${category} booking request received.`,
+          bookingId
+        );
+
+        return bookingId;
+      });
 
     const bookingId =
-      Number(result.lastInsertRowid);
-
-    addNotification(
-      worker.user_id,
-      "booking_request",
-      `New ${category} job request received.`,
-      bookingId
-    );
+      transaction();
 
     res.status(201).json({
       success: true,
+
       bookingId,
 
       pricing: {
-        workerPrice,
-        platformFee,
-        customerTotal
+        workerPrice:
+          pricing.workerPrice,
+
+        platformFee:
+          pricing.platformFee,
+
+        discount:
+          pricing.discount,
+
+        customerTotal:
+          pricing.customerTotal
       },
 
       paymentMethod,
 
-      // Customer gets the code.
-      // It is NOT stored in plaintext.
+      /*
+        Completion code belongs to customer.
+        Store only its hash in database.
+      */
       completionCode,
+
+      loyalty: {
+        completedBookings:
+          pricing.completedBookings,
+
+        firstBookingFree:
+          FIRST_BOOKING_FREE &&
+          pricing.completedBookings === 0,
+
+        discountPercent:
+          LOYALTY_DISCOUNT_PERCENT
+      },
 
       message:
         paymentMethod === "online"
-          ? "Booking created. Complete online payment to continue."
+          ? "Booking created. Online payment is required."
           : "Booking request sent successfully."
     });
   }
 );
-
 
 // ============================================================
 // WORKER ACCEPT BOOKING
@@ -1385,19 +1959,25 @@ app.post(
   requireUser,
   requireRole("worker"),
   (req, res) => {
-
     const bookingId =
       Number(req.params.id);
 
     const worker =
       getWorkerByUserId(
-        req.user.id
+        req.user.user_id
       );
 
     if (!worker) {
       return res.status(404).json({
         error:
           "Worker profile not found."
+      });
+    }
+
+    if (!worker.approved) {
+      return res.status(403).json({
+        error:
+          "Worker is not approved."
       });
     }
 
@@ -1431,7 +2011,7 @@ app.post(
     ) {
       return res.status(400).json({
         error:
-          "This booking cannot be accepted."
+          "Booking cannot be accepted."
       });
     }
 
@@ -1443,33 +2023,36 @@ app.post(
     ) {
       return res.status(400).json({
         error:
-          "Online payment is not completed yet."
+          "Online payment is not completed."
       });
     }
 
-    db.prepare(`
-      UPDATE bookings
-      SET
-        status = 'accepted',
-        accepted_at = CURRENT_TIMESTAMP,
-        worker_phone_revealed = 1,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(bookingId);
+    const transaction =
+      db.transaction(() => {
+        db.prepare(`
+          UPDATE bookings
+          SET
+            status = 'accepted',
+            accepted_at = CURRENT_TIMESTAMP,
+            worker_phone_revealed = 1,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(bookingId);
 
-    addNotification(
-      booking.customer_id,
-      "booking_accepted",
-      "Your worker has accepted the booking. Worker contact details are now available.",
-      bookingId
-    );
+        addNotification(
+          booking.customer_id,
+          "booking_accepted",
+          "Your worker accepted the booking. Worker contact is now available.",
+          bookingId
+        );
+      });
+
+    transaction();
 
     res.json({
       success: true,
       message:
         "Booking accepted.",
-
-      // Phone is revealed ONLY now.
       workerPhone:
         db.prepare(`
           SELECT phone
@@ -1482,7 +2065,6 @@ app.post(
   }
 );
 
-
 // ============================================================
 // GET BOOKING CONTACT
 // ============================================================
@@ -1491,7 +2073,6 @@ app.get(
   "/api/bookings/:id/contact",
   requireUser,
   (req, res) => {
-
     const bookingId =
       Number(req.params.id);
 
@@ -1518,17 +2099,17 @@ app.get(
 
     const worker =
       getWorkerByUserId(
-        req.user.id
+        req.user.user_id
       );
 
     const isCustomer =
       booking.customer_id ===
-      req.user.id;
+      req.user.user_id;
 
     const isWorker =
       worker &&
-      booking.worker_id ===
-      worker.id;
+      worker.id ===
+      booking.worker_id;
 
     if (
       !isCustomer &&
@@ -1545,7 +2126,7 @@ app.get(
     ) {
       return res.status(403).json({
         error:
-          "Worker contact is available after the booking is accepted."
+          "Worker contact becomes available after acceptance."
       });
     }
 
@@ -1556,9 +2137,8 @@ app.get(
   }
 );
 
-
 // ============================================================
-// WORKER START JOB
+// START JOB
 // ============================================================
 
 app.post(
@@ -1566,10 +2146,9 @@ app.post(
   requireUser,
   requireRole("worker"),
   (req, res) => {
-
     const worker =
       getWorkerByUserId(
-        req.user.id
+        req.user.user_id
       );
 
     const booking =
@@ -1629,36 +2208,42 @@ app.post(
     res.json({
       success: true,
       message:
-        "Job marked as started."
+        "Job started."
     });
   }
 );
 
-
 // ============================================================
-// COMPLETE BOOKING WITH CODE
+// COMPLETE BOOKING
 // ============================================================
 
 app.post(
   "/api/bookings/:id/complete",
   requireUser,
+  requireRole("worker"),
   (req, res) => {
-
     const bookingId =
       Number(req.params.id);
 
     const code =
       cleanString(
         req.body.code,
-        10
+        6
       );
 
-    if (!/^[0-9]{6}$/.test(code)) {
+    if (
+      !/^[0-9]{6}$/.test(code)
+    ) {
       return res.status(400).json({
         error:
-          "Valid completion code is required."
+          "Valid 6 digit completion code required."
       });
     }
+
+    const worker =
+      getWorkerByUserId(
+        req.user.user_id
+      );
 
     const booking =
       db.prepare(`
@@ -1667,27 +2252,20 @@ app.post(
         WHERE id = ?
       `).get(bookingId);
 
-    if (!booking) {
+    if (!worker || !booking) {
       return res.status(404).json({
         error:
           "Booking not found."
       });
     }
 
-    const worker =
-      getWorkerByUserId(
-        req.user.id
-      );
-
-    const isWorker =
-      worker &&
-      worker.id ===
-      booking.worker_id;
-
-    if (!isWorker) {
+    if (
+      booking.worker_id !==
+      worker.id
+    ) {
       return res.status(403).json({
         error:
-          "Only the appointed worker can complete the job."
+          "Only the appointed worker can complete this job."
       });
     }
 
@@ -1706,13 +2284,26 @@ app.post(
     ) {
       return res.status(400).json({
         error:
-          "Booking is already completed."
+          "Booking already completed."
       });
     }
 
     if (
-      hashValue(code) !==
-      booking.completion_code_hash
+      booking.completion_code_expires_at &&
+      Date.now() >
+        booking.completion_code_expires_at
+    ) {
+      return res.status(400).json({
+        error:
+          "Completion code expired."
+      });
+    }
+
+    if (
+      !safeEqual(
+        hashValue(code),
+        booking.completion_code_hash
+      )
     ) {
       return res.status(400).json({
         error:
@@ -1722,49 +2313,59 @@ app.post(
 
     const transaction =
       db.transaction(() => {
-
         db.prepare(`
           UPDATE bookings
           SET
             status = 'completed',
             completion_code_verified = 1,
             completed_at = CURRENT_TIMESTAMP,
-            payment_status = CASE
-              WHEN payment_method = 'online'
-                THEN 'paid'
-              ELSE 'cash_received'
-            END,
+
+            payment_status =
+              CASE
+                WHEN payment_method = 'online'
+                  THEN 'paid'
+                ELSE 'cash_received'
+              END,
+
             worker_fee_status = 'pending',
+
             updated_at = CURRENT_TIMESTAMP
+
           WHERE id = ?
         `).run(bookingId);
 
-        // ----------------------------------------------------
-        // Platform revenue ledger
-        // ----------------------------------------------------
+        /*
+          Platform revenue is recorded only after
+          successful completion verification.
+        */
 
-        db.prepare(`
-          INSERT INTO worker_ledger
-          (
-            worker_id,
-            booking_id,
-            type,
-            amount,
-            status,
-            description
-          )
-          VALUES (?, ?, 'platform_fee', ?, 'pending', ?)
-        `).run(
-          worker.id,
-          bookingId,
-          booking.platform_fee,
-          `Platform fee for booking #${bookingId}`
-        );
+        if (
+          Number(booking.platform_fee) > 0
+        ) {
+          db.prepare(`
+            INSERT INTO worker_ledger
+            (
+              worker_id,
+              booking_id,
+              type,
+              amount,
+              status,
+              description
+            )
+            VALUES
+            (?, ?, 'platform_fee', ?, 'pending', ?)
+          `).run(
+            worker.id,
+            bookingId,
+            booking.platform_fee,
+            `Platform fee for booking #${bookingId}`
+          );
+        }
 
         addNotification(
           booking.customer_id,
           "booking_completed",
-          `Booking #${bookingId} has been completed successfully.`,
+          `Booking #${bookingId} completed successfully.`,
           bookingId
         );
       });
@@ -1781,29 +2382,132 @@ app.post(
   }
 );
 
+// ============================================================
+// CANCEL BOOKING
+// ============================================================
+
+app.post(
+  "/api/bookings/:id/cancel",
+  requireUser,
+  (req, res) => {
+    const bookingId =
+      Number(req.params.id);
+
+    const reason =
+      cleanString(
+        req.body.reason ||
+        "Cancelled by user.",
+        300
+      );
+
+    const booking =
+      db.prepare(`
+        SELECT *
+        FROM bookings
+        WHERE id = ?
+      `).get(bookingId);
+
+    if (!booking) {
+      return res.status(404).json({
+        error:
+          "Booking not found."
+      });
+    }
+
+    const worker =
+      getWorkerByUserId(
+        req.user.user_id
+      );
+
+    const isCustomer =
+      booking.customer_id ===
+      req.user.user_id;
+
+    const isWorker =
+      worker &&
+      booking.worker_id ===
+      worker.id;
+
+    if (
+      !isCustomer &&
+      !isWorker
+    ) {
+      return res.status(403).json({
+        error:
+          "Access denied."
+      });
+    }
+
+    if (
+      booking.status ===
+        "completed" ||
+      booking.status ===
+        "cancelled"
+    ) {
+      return res.status(400).json({
+        error:
+          "Booking cannot be cancelled."
+      });
+    }
+
+    db.prepare(`
+      UPDATE bookings
+      SET
+        status = 'cancelled',
+        cancelled_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(bookingId);
+
+    const otherUserId =
+      isCustomer
+        ? db.prepare(`
+            SELECT user_id
+            FROM workers
+            WHERE id = ?
+          `).get(
+            booking.worker_id
+          ).user_id
+        : booking.customer_id;
+
+    addNotification(
+      otherUserId,
+      "booking_cancelled",
+      `Booking #${bookingId} was cancelled. Reason: ${reason}`,
+      bookingId
+    );
+
+    res.json({
+      success: true,
+      message:
+        "Booking cancelled."
+    });
+  }
+);
 
 // ============================================================
-// CUSTOMER / WORKER BOOKINGS
+// MY BOOKINGS
 // ============================================================
 
 app.get(
   "/api/bookings/my",
   requireUser,
   (req, res) => {
-
-    let bookings;
-
     if (
       req.user.role ===
       "customer"
     ) {
-
-      bookings =
+      const bookings =
         db.prepare(`
           SELECT
             b.*,
             w.name AS worker_name,
-            u.phone AS worker_phone
+            w.verified AS worker_verified,
+            CASE
+              WHEN b.worker_phone_revealed = 1
+              THEN u.phone
+              ELSE NULL
+            END AS worker_phone
           FROM bookings b
           JOIN workers w
             ON w.id = b.worker_id
@@ -1812,17 +2516,21 @@ app.get(
           WHERE b.customer_id = ?
           ORDER BY b.id DESC
         `).all(
-          req.user.id
+          req.user.user_id
         );
 
-    } else if (
+      return res.json({
+        bookings
+      });
+    }
+
+    if (
       req.user.role ===
       "worker"
     ) {
-
       const worker =
         getWorkerByUserId(
-          req.user.id
+          req.user.user_id
         );
 
       if (!worker) {
@@ -1831,11 +2539,15 @@ app.get(
         });
       }
 
-      bookings =
+      const bookings =
         db.prepare(`
           SELECT
             b.*,
-            u.phone AS customer_phone
+            CASE
+              WHEN b.worker_phone_revealed = 1
+              THEN u.phone
+              ELSE NULL
+            END AS customer_phone
           FROM bookings b
           JOIN users u
             ON u.id = b.customer_id
@@ -1845,29 +2557,63 @@ app.get(
           worker.id
         );
 
-      // Do NOT expose customer phone before acceptance.
-      bookings =
-        bookings.map(
-          booking => ({
-            ...booking,
-            customer_phone:
-              booking.status ===
-                "requested"
-                ? "Hidden until accepted"
-                : booking.customer_phone
-          })
-        );
-    } else {
-
-      bookings = [];
+      return res.json({
+        bookings
+      });
     }
 
     res.json({
-      bookings
+      bookings: []
     });
   }
 );
 
+// ============================================================
+// CUSTOMER LOYALTY
+// ============================================================
+
+app.get(
+  "/api/customer/loyalty",
+  requireUser,
+  requireRole("customer"),
+  (req, res) => {
+    const completed =
+      getCompletedBookingCount(
+        req.user.user_id
+      );
+
+    const nextRewardAt =
+      completed === 0
+        ? LOYALTY_COMPLETED_BOOKINGS
+        : (
+            Math.floor(
+              completed /
+                LOYALTY_COMPLETED_BOOKINGS
+            ) + 1
+          ) *
+          LOYALTY_COMPLETED_BOOKINGS;
+
+    res.json({
+      completedBookings:
+        completed,
+
+      loyaltyTarget:
+        LOYALTY_COMPLETED_BOOKINGS,
+
+      discountPercent:
+        LOYALTY_DISCOUNT_PERCENT,
+
+      nextRewardAt,
+
+      remaining:
+        Math.max(
+          nextRewardAt -
+            completed,
+          0
+        )
+    });
+  }
+);
 
 // ============================================================
 // NOTIFICATIONS
@@ -1877,7 +2623,6 @@ app.get(
   "/api/notifications",
   requireUser,
   (req, res) => {
-
     const notifications =
       db.prepare(`
         SELECT *
@@ -1886,7 +2631,7 @@ app.get(
         ORDER BY id DESC
         LIMIT 100
       `).all(
-        req.user.id
+        req.user.user_id
       );
 
     res.json({
@@ -1895,12 +2640,10 @@ app.get(
   }
 );
 
-
 app.post(
   "/api/notifications/:id/read",
   requireUser,
   (req, res) => {
-
     db.prepare(`
       UPDATE notifications
       SET read = 1
@@ -1908,7 +2651,7 @@ app.post(
         AND user_id = ?
     `).run(
       Number(req.params.id),
-      req.user.id
+      req.user.user_id
     );
 
     res.json({
@@ -1917,62 +2660,465 @@ app.post(
   }
 );
 
-
 // ============================================================
-// WORKER AVAILABILITY
+// ONLINE PAYMENT CREATE
 // ============================================================
 
 app.post(
-  "/api/workers/availability",
+  "/api/payments/create",
   requireUser,
-  requireRole("worker"),
-  (req, res) => {
+  requireRole("customer"),
+  async (req, res) => {
+    const bookingId =
+      Number(req.body.bookingId);
 
-    const worker =
-      getWorkerByUserId(
-        req.user.id
+    const booking =
+      db.prepare(`
+        SELECT *
+        FROM bookings
+        WHERE id = ?
+          AND customer_id = ?
+      `).get(
+        bookingId,
+        req.user.user_id
       );
 
-    if (!worker) {
+    if (!booking) {
       return res.status(404).json({
         error:
-          "Worker profile not found."
+          "Booking not found."
       });
     }
 
-    const available =
-      Boolean(
-        req.body.available
+    if (
+      booking.payment_method !==
+      "online"
+    ) {
+      return res.status(400).json({
+        error:
+          "This booking uses cash payment."
+      });
+    }
+
+    if (
+      booking.status ===
+      "cancelled"
+    ) {
+      return res.status(400).json({
+        error:
+          "Cancelled booking."
+      });
+    }
+
+    if (
+      booking.payment_status ===
+      "paid"
+    ) {
+      return res.json({
+        success: true,
+        alreadyPaid: true,
+        bookingId
+      });
+    }
+
+    /*
+      REAL PAYMENT GATEWAY SUPPORT
+
+      Set these Render environment variables:
+
+      RAZORPAY_KEY_ID
+      RAZORPAY_KEY_SECRET
+
+      The backend creates the order.
+      Frontend uses the returned order details.
+    */
+
+    const keyId =
+      process.env.RAZORPAY_KEY_ID;
+
+    const keySecret =
+      process.env.RAZORPAY_KEY_SECRET;
+
+    if (
+      !keyId ||
+      !keySecret
+    ) {
+      return res.status(503).json({
+        error:
+          "Online payment gateway is not configured yet.",
+        amount:
+          booking.customer_total,
+        currency: "INR"
+      });
+    }
+
+    try {
+      const Razorpay =
+        require("razorpay");
+
+      const razorpay =
+        new Razorpay({
+          key_id: keyId,
+          key_secret: keySecret
+        });
+
+      const order =
+        await razorpay.orders.create({
+          amount:
+            Math.round(
+              Number(
+                booking.customer_total
+              ) * 100
+            ),
+          currency: "INR",
+          receipt:
+            `KS-${booking.id}`,
+          notes: {
+            bookingId:
+              String(booking.id),
+            customerId:
+              String(
+                booking.customer_id
+              )
+          }
+        });
+
+      db.prepare(`
+        INSERT INTO payment_orders
+        (
+          booking_id,
+          provider,
+          provider_order_id,
+          amount,
+          currency,
+          status
+        )
+        VALUES (?, 'razorpay', ?, ?, 'INR', 'created')
+
+        ON CONFLICT(booking_id)
+        DO UPDATE SET
+          provider_order_id =
+            excluded.provider_order_id,
+          amount =
+            excluded.amount,
+          status =
+            'created',
+          updated_at =
+            CURRENT_TIMESTAMP
+      `).run(
+        booking.id,
+        order.id,
+        booking.customer_total
       );
 
-    db.prepare(`
-      UPDATE workers
-      SET
-        available = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(
-      available ? 1 : 0,
-      worker.id
-    );
+      res.json({
+        success: true,
+
+        provider: "razorpay",
+
+        keyId,
+
+        orderId:
+          order.id,
+
+        amount:
+          booking.customer_total,
+
+        currency:
+          "INR"
+      });
+
+    } catch (error) {
+      console.error(
+        "Payment order error:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Unable to create payment order."
+      });
+    }
+  }
+);
+
+// ============================================================
+// RAZORPAY PAYMENT VERIFY
+// ============================================================
+
+app.post(
+  "/api/payments/verify",
+  requireUser,
+  requireRole("customer"),
+  (req, res) => {
+    const bookingId =
+      Number(req.body.bookingId);
+
+    const paymentId =
+      cleanString(
+        req.body.razorpay_payment_id,
+        200
+      );
+
+    const orderId =
+      cleanString(
+        req.body.razorpay_order_id,
+        200
+      );
+
+    const signature =
+      cleanString(
+        req.body.razorpay_signature,
+        300
+      );
+
+    const keySecret =
+      process.env.RAZORPAY_KEY_SECRET;
+
+    if (
+      !keySecret
+    ) {
+      return res.status(503).json({
+        error:
+          "Payment gateway is not configured."
+      });
+    }
+
+    const booking =
+      db.prepare(`
+        SELECT *
+        FROM bookings
+        WHERE id = ?
+          AND customer_id = ?
+          AND payment_method = 'online'
+      `).get(
+        bookingId,
+        req.user.user_id
+      );
+
+    if (!booking) {
+      return res.status(404).json({
+        error:
+          "Booking not found."
+      });
+    }
+
+    const expected =
+      crypto
+        .createHmac(
+          "sha256",
+          keySecret
+        )
+        .update(
+          `${orderId}|${paymentId}`
+        )
+        .digest("hex");
+
+    if (
+      !safeEqual(
+        expected,
+        signature
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          "Invalid payment signature."
+      });
+    }
+
+    const paymentOrder =
+      db.prepare(`
+        SELECT *
+        FROM payment_orders
+        WHERE booking_id = ?
+          AND provider_order_id = ?
+      `).get(
+        bookingId,
+        orderId
+      );
+
+    if (!paymentOrder) {
+      return res.status(400).json({
+        error:
+          "Payment order mismatch."
+      });
+    }
+
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE bookings
+        SET
+          payment_status = 'paid',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(bookingId);
+
+      db.prepare(`
+        UPDATE payment_orders
+        SET
+          status = 'paid',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE booking_id = ?
+      `).run(bookingId);
+
+      addNotification(
+        booking.worker_id,
+        "payment_received",
+        `Online payment received for booking #${bookingId}.`,
+        bookingId
+      );
+    })();
 
     res.json({
       success: true,
-      available
+      message:
+        "Payment verified successfully."
     });
   }
 );
 
+// ============================================================
+// PAYMENT WEBHOOK
+// ============================================================
+
+app.post(
+  "/api/payments/webhook",
+  express.raw({
+    type: "application/json"
+  }),
+  (req, res) => {
+    /*
+      Razorpay webhook signature verification
+      should be configured using RAZORPAY_WEBHOOK_SECRET.
+
+      This route deliberately does not trust a browser's
+      {paid:true} field.
+    */
+
+    const webhookSecret =
+      process.env.RAZORPAY_WEBHOOK_SECRET;
+
+    if (!webhookSecret) {
+      return res.status(503).json({
+        error:
+          "Webhook secret is not configured."
+      });
+    }
+
+    const signature =
+      String(
+        req.headers[
+          "x-razorpay-signature"
+        ] || ""
+      );
+
+    const rawBody =
+      Buffer.isBuffer(req.body)
+        ? req.body
+        : Buffer.from(
+            JSON.stringify(
+              req.body || {}
+            )
+          );
+
+    const expected =
+      crypto
+        .createHmac(
+          "sha256",
+          webhookSecret
+        )
+        .update(rawBody)
+        .digest("hex");
+
+    if (
+      !safeEqual(
+        expected,
+        signature
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          "Invalid webhook signature."
+      });
+    }
+
+    let payload;
+
+    try {
+      payload =
+        JSON.parse(
+          rawBody.toString()
+        );
+    } catch {
+      return res.status(400).json({
+        error:
+          "Invalid webhook payload."
+      });
+    }
+
+    const event =
+      payload.event;
+
+    if (
+      event ===
+      "payment.captured"
+    ) {
+      const payment =
+        payload.payload &&
+        payload.payload.payment &&
+        payload.payload.payment.entity;
+
+      if (payment) {
+        const orderId =
+          payment.order_id;
+
+        const bookingOrder =
+          db.prepare(`
+            SELECT *
+            FROM payment_orders
+            WHERE provider_order_id = ?
+          `).get(orderId);
+
+        if (bookingOrder) {
+          db.transaction(() => {
+            db.prepare(`
+              UPDATE bookings
+              SET
+                payment_status = 'paid',
+                updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+            `).run(
+              bookingOrder.booking_id
+            );
+
+            db.prepare(`
+              UPDATE payment_orders
+              SET
+                status = 'paid',
+                updated_at = CURRENT_TIMESTAMP
+              WHERE booking_id = ?
+            `).run(
+              bookingOrder.booking_id
+            );
+          })();
+        }
+      }
+    }
+
+    res.json({
+      received: true
+    });
+  }
+);
 
 // ============================================================
-// ADMIN - STATS
+// ADMIN STATS
 // ============================================================
 
 app.get(
   "/api/admin/stats",
   requireAdmin,
   (req, res) => {
-
     const users =
       db.prepare(`
         SELECT COUNT(*) AS count
@@ -1985,27 +3131,35 @@ app.get(
         FROM workers
       `).get().count;
 
+    const verifiedWorkers =
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM workers
+        WHERE approved = 1
+          AND verified = 1
+      `).get().count;
+
     const bookings =
       db.prepare(`
         SELECT COUNT(*) AS count
         FROM bookings
       `).get().count;
 
-    const pendingWorkers =
-      db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM workers
-        WHERE approved = 0
-      `).get().count;
-
-    const completedBookings =
+    const completed =
       db.prepare(`
         SELECT COUNT(*) AS count
         FROM bookings
         WHERE status = 'completed'
       `).get().count;
 
-    const platformRevenue =
+    const cancelled =
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM bookings
+        WHERE status = 'cancelled'
+      `).get().count;
+
+    const revenue =
       db.prepare(`
         SELECT
           COALESCE(
@@ -2016,7 +3170,7 @@ app.get(
         WHERE status = 'completed'
       `).get().total;
 
-    const pendingWorkerFees =
+    const unsettled =
       db.prepare(`
         SELECT
           COALESCE(
@@ -2031,29 +3185,28 @@ app.get(
     res.json({
       users,
       workers,
+      verifiedWorkers,
       bookings,
-      pending_workers:
-        pendingWorkers,
-      completed_bookings:
-        completedBookings,
-      platform_revenue:
-        roundMoney(platformRevenue),
-      pending_worker_fees:
-        roundMoney(pendingWorkerFees)
+      completedBookings:
+        completed,
+      cancelledBookings:
+        cancelled,
+      platformRevenue:
+        roundMoney(revenue),
+      unsettledPlatformFees:
+        roundMoney(unsettled)
     });
   }
 );
 
-
 // ============================================================
-// ADMIN - WORKERS
+// ADMIN WORKERS
 // ============================================================
 
 app.get(
   "/api/admin/workers",
   requireAdmin,
   (req, res) => {
-
     const workers =
       db.prepare(`
         SELECT
@@ -2068,46 +3221,43 @@ app.get(
       `).all();
 
     res.json(
-      workers.map(worker => ({
-        id: worker.id,
-        name: worker.name,
-        phone: worker.phone,
-        category: worker.category,
-        skills: worker.skills,
-        experience: worker.experience,
-        rate: worker.rate,
-        bio: worker.bio,
-        rating: worker.rating,
-        approved:
-          Boolean(worker.approved),
-        available:
-          Boolean(worker.available),
-        lat: worker.lat,
-        lng: worker.lng,
-        created_at:
-          worker.created_at
-      }))
+      workers.map(
+        worker => ({
+          id: worker.id,
+          name: worker.name,
+          phone: worker.phone,
+          category: worker.category,
+          skills: worker.skills,
+          experience: worker.experience,
+          rate: worker.rate,
+          bio: worker.bio,
+          rating: worker.rating,
+          approved:
+            Boolean(worker.approved),
+          verified:
+            Boolean(worker.verified),
+          available:
+            Boolean(worker.available),
+          lat: worker.lat,
+          lng: worker.lng,
+          created_at:
+            worker.created_at
+        })
+      )
     );
   }
 );
 
-
 // ============================================================
-// ADMIN - APPROVE / DISABLE WORKER
+// ADMIN APPROVE / VERIFY WORKER
 // ============================================================
 
 app.patch(
   "/api/admin/workers/:id",
   requireAdmin,
   (req, res) => {
-
     const workerId =
       Number(req.params.id);
-
-    const approved =
-      Boolean(
-        req.body.approved
-      );
 
     const worker =
       db.prepare(`
@@ -2123,19 +3273,37 @@ app.patch(
       });
     }
 
+    const approved =
+      req.body.approved === true ||
+      String(
+        req.body.approved
+      ).toLowerCase() === "true";
+
+    const verified =
+      req.body.verified === true ||
+      String(
+        req.body.verified
+      ).toLowerCase() === "true";
+
     db.prepare(`
       UPDATE workers
       SET
         approved = ?,
-        available = CASE
-          WHEN ? = 1
+        verified = ?,
+        available =
+          CASE
+            WHEN ? = 1
             THEN available
-          ELSE 0
-        END,
-        updated_at = CURRENT_TIMESTAMP
+            ELSE 0
+          END,
+        updated_at =
+          CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       approved ? 1 : 0,
+      approved && verified
+        ? 1
+        : 0,
       approved ? 1 : 0,
       workerId
     );
@@ -2146,27 +3314,31 @@ app.patch(
         ? "worker_approved"
         : "worker_disabled",
       approved
-        ? "Your KaamSetu worker profile has been approved."
+        ? (
+            verified
+              ? "Your KaamSetu profile is approved and verified."
+              : "Your KaamSetu profile is approved."
+          )
         : "Your KaamSetu worker profile has been disabled."
     );
 
     res.json({
       success: true,
-      approved
+      approved,
+      verified:
+        approved && verified
     });
   }
 );
 
-
 // ============================================================
-// ADMIN - BOOKINGS
+// ADMIN BOOKINGS
 // ============================================================
 
 app.get(
   "/api/admin/bookings",
   requireAdmin,
   (req, res) => {
-
     const bookings =
       db.prepare(`
         SELECT
@@ -2176,7 +3348,10 @@ app.get(
             AS customer_phone,
 
           worker.name
-            AS worker_name
+            AS worker_name,
+
+          worker.phone
+            AS worker_phone
 
         FROM bookings b
 
@@ -2188,32 +3363,28 @@ app.get(
           ON worker.id =
              b.worker_id
 
+        JOIN users workerUser
+          ON workerUser.id =
+             worker.user_id
+
         ORDER BY
           b.id DESC
       `).all();
 
-    res.json(
-      bookings.map(
-        booking => ({
-          ...booking,
-          estimated_price:
-            booking.customer_total
-        })
-      )
-    );
+    res.json({
+      bookings
+    });
   }
 );
 
-
 // ============================================================
-// ADMIN - WORKER LEDGER
+// ADMIN LEDGER
 // ============================================================
 
 app.get(
   "/api/admin/worker-ledger",
   requireAdmin,
   (req, res) => {
-
     const ledger =
       db.prepare(`
         SELECT
@@ -2234,16 +3405,14 @@ app.get(
   }
 );
 
-
 // ============================================================
-// ADMIN - MARK PLATFORM FEE SETTLED
+// ADMIN SETTLE PLATFORM FEE
 // ============================================================
 
 app.patch(
   "/api/admin/worker-ledger/:id/settle",
   requireAdmin,
   (req, res) => {
-
     const ledgerId =
       Number(req.params.id);
 
@@ -2267,7 +3436,7 @@ app.patch(
     ) {
       return res.status(400).json({
         error:
-          "This fee is already settled."
+          "Already settled."
       });
     }
 
@@ -2285,16 +3454,14 @@ app.patch(
   }
 );
 
-
 // ============================================================
-// ADMIN - REVENUE SUMMARY
+// ADMIN REVENUE
 // ============================================================
 
 app.get(
   "/api/admin/revenue",
   requireAdmin,
   (req, res) => {
-
     const summary =
       db.prepare(`
         SELECT
@@ -2309,6 +3476,11 @@ app.get(
             SUM(platform_fee),
             0
           ) AS platform_revenue,
+
+          COALESCE(
+            SUM(discount),
+            0
+          ) AS discounts,
 
           COALESCE(
             SUM(customer_total),
@@ -2349,6 +3521,11 @@ app.get(
           summary.platform_revenue
         ),
 
+      discounts:
+        roundMoney(
+          summary.discounts
+        ),
+
       customerTotal:
         roundMoney(
           summary.customer_total
@@ -2362,116 +3539,38 @@ app.get(
   }
 );
 
-
 // ============================================================
-// ONLINE PAYMENT PLACEHOLDER
-// ============================================================
-// This endpoint intentionally does NOT pretend to process real
-// money. A real payment gateway webhook must verify payment
-// server-to-server before marking payment as paid.
-//
-// Gateway can later call:
-// POST /api/payments/webhook
+// CLEAN OLD SESSIONS / OTPs
 // ============================================================
 
-app.post(
-  "/api/payments/create",
-  requireUser,
-  requireRole("customer"),
-  (req, res) => {
-
-    const bookingId =
-      Number(req.body.bookingId);
-
-    const booking =
+setInterval(
+  () => {
+    try {
       db.prepare(`
-        SELECT *
-        FROM bookings
-        WHERE id = ?
-          AND customer_id = ?
-      `).get(
-        bookingId,
-        req.user.id
+        DELETE FROM sessions
+        WHERE expires_at < ?
+      `).run(
+        Date.now()
       );
 
-    if (!booking) {
-      return res.status(404).json({
-        error:
-          "Booking not found."
-      });
+      db.prepare(`
+        DELETE FROM otp_codes
+        WHERE expires_at < ?
+      `).run(
+        Date.now()
+      );
+    } catch (error) {
+      console.error(
+        "Cleanup error:",
+        error
+      );
     }
-
-    if (
-      booking.payment_method !==
-      "online"
-    ) {
-      return res.status(400).json({
-        error:
-          "This booking uses cash payment."
-      });
-    }
-
-    if (
-      booking.payment_status ===
-      "paid"
-    ) {
-      return res.json({
-        success: true,
-        alreadyPaid: true
-      });
-    }
-
-    // --------------------------------------------------------
-    // Replace this section with actual Razorpay/other gateway.
-    // Server must create the gateway order using
-    // booking.customer_total.
-    // --------------------------------------------------------
-
-    res.json({
-      success: true,
-      paymentRequired: true,
-      bookingId,
-      amount:
-        booking.customer_total,
-      currency: "INR",
-      message:
-        "Connect your payment gateway here for real online payment."
-    });
-  }
+  },
+  60 * 60 * 1000
 );
 
-
 // ============================================================
-// PAYMENT WEBHOOK PLACEHOLDER
-// ============================================================
-
-app.post(
-  "/api/payments/webhook",
-  (req, res) => {
-
-    // IMPORTANT:
-    // Do not trust frontend payment confirmation.
-    //
-    // Real gateway webhook signature must be verified here.
-    //
-    // After verification:
-    //
-    // booking.payment_status = "paid"
-    //
-    // Never simply accept:
-    // { paid: true }
-    // from a browser.
-
-    res.status(501).json({
-      error:
-        "Payment gateway webhook is not configured yet."
-    });
-  }
-);
-
-
-// ============================================================
-// 404 API
+// API 404
 // ============================================================
 
 app.use(
@@ -2484,17 +3583,18 @@ app.use(
   }
 );
 
-
 // ============================================================
 // STATIC FRONTEND
 // ============================================================
 
 app.use(
   express.static(
-    path.join(__dirname, "public")
+    path.join(
+      __dirname,
+      "public"
+    )
   )
 );
-
 
 // ============================================================
 // FRONTEND FALLBACK
@@ -2503,7 +3603,6 @@ app.use(
 app.get(
   "*splat",
   (req, res) => {
-
     if (
       req.path.startsWith("/api/")
     ) {
@@ -2523,14 +3622,17 @@ app.get(
   }
 );
 
-
 // ============================================================
 // ERROR HANDLER
 // ============================================================
 
 app.use(
-  (err, req, res, next) => {
-
+  (
+    err,
+    req,
+    res,
+    next
+  ) => {
     console.error(
       "KaamSetu server error:",
       err
@@ -2549,7 +3651,6 @@ app.use(
   }
 );
 
-
 // ============================================================
 // START SERVER
 // ============================================================
@@ -2558,13 +3659,24 @@ app.listen(
   PORT,
   "0.0.0.0",
   () => {
-
     console.log(
       `KaamSetu server running on port ${PORT}`
     );
 
     console.log(
       `Platform fee: ${PLATFORM_FEE_PERCENT}%`
+    );
+
+    console.log(
+      `First booking free: ${FIRST_BOOKING_FREE}`
+    );
+
+    console.log(
+      `Loyalty target: ${LOYALTY_COMPLETED_BOOKINGS}`
+    );
+
+    console.log(
+      `Loyalty discount: ${LOYALTY_DISCOUNT_PERCENT}%`
     );
 
     console.log(
