@@ -1,6 +1,6 @@
 // ============================================================
-// KAAMSETU - FINAL FRONTEND APP
-// Matches the current server.js API
+// KAAMSETU - FINAL FRONTEND APP.JS
+// Matches current server.js API
 // ============================================================
 
 "use strict";
@@ -9,14 +9,43 @@ const API_BASE = "/api";
 
 const state = {
   user: null,
+  token: null,
+
   selectedService: "",
   customerLocation: null,
+
   nearbyWorkers: [],
   selectedWorker: null,
+
   currentBookings: [],
   notifications: [],
+
   otpPhone: "",
   pendingBooking: null
+};
+
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+
+const SERVICES = [
+  "Plumber",
+  "Electrician",
+  "Carpenter",
+  "Painter",
+  "Cleaner",
+  "AC Technician",
+  "Mechanic",
+  "General Labour"
+];
+
+const BOOKING_STATUSES = {
+  requested: "Requested",
+  accepted: "Accepted",
+  in_progress: "In Progress",
+  completed: "Completed",
+  cancelled: "Cancelled"
 };
 
 
@@ -28,6 +57,7 @@ function getApp() {
   return document.getElementById("app");
 }
 
+
 function escapeHTML(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -36,6 +66,7 @@ function escapeHTML(value) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+
 
 function money(value) {
   const amount = Number(value || 0);
@@ -47,6 +78,33 @@ function money(value) {
   }).format(amount);
 }
 
+
+function formatDate(value) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return date.toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  });
+}
+
+
+function statusLabel(status) {
+  return (
+    BOOKING_STATUSES[status] ||
+    String(status || "Unknown")
+  );
+}
+
+
 function showMessage(message, type = "info") {
   const old = document.getElementById("ks-message");
 
@@ -57,25 +115,24 @@ function showMessage(message, type = "info") {
   const box = document.createElement("div");
 
   box.id = "ks-message";
-  box.textContent = message;
+  box.textContent = String(message || "");
   box.className = `ks-message ks-${type}`;
 
   document.body.appendChild(box);
 
   setTimeout(() => {
-    box.remove();
+    if (box.isConnected) {
+      box.remove();
+    }
   }, 4500);
 }
 
 
 // ============================================================
-// API REQUEST HELPER
+// API REQUEST
 // ============================================================
 
-async function apiRequest(
-  endpoint,
-  options = {}
-) {
+async function apiRequest(endpoint, options = {}) {
   const headers = {
     ...(options.headers || {})
   };
@@ -84,8 +141,9 @@ async function apiRequest(
     headers["Content-Type"] = "application/json";
   }
 
-  if (state.user?.id) {
-    headers["x-user-id"] = String(state.user.id);
+  // Current server.js supports signed Bearer sessions.
+  if (state.token) {
+    headers.Authorization = `Bearer ${state.token}`;
   }
 
   const response = await fetch(
@@ -105,6 +163,10 @@ async function apiRequest(
   }
 
   if (!response.ok) {
+    if (response.status === 401) {
+      handleExpiredSession();
+    }
+
     throw new Error(
       data.error ||
       `Request failed (${response.status})`
@@ -116,51 +178,92 @@ async function apiRequest(
 
 
 // ============================================================
-// LOCAL SESSION
+// SESSION
 // ============================================================
 
 function saveSession() {
-  if (!state.user) {
-    localStorage.removeItem("kaamsetu_user");
+  if (!state.user || !state.token) {
+    localStorage.removeItem("kaamsetu_session");
     return;
   }
 
   localStorage.setItem(
-    "kaamsetu_user",
-    JSON.stringify(state.user)
+    "kaamsetu_session",
+    JSON.stringify({
+      user: state.user,
+      token: state.token
+    })
   );
 }
+
 
 function loadSession() {
   try {
     const raw =
-      localStorage.getItem("kaamsetu_user");
+      localStorage.getItem(
+        "kaamsetu_session"
+      );
 
     if (!raw) {
       return;
     }
 
-    const user = JSON.parse(raw);
+    const session = JSON.parse(raw);
 
     if (
-      user &&
-      Number.isInteger(Number(user.id))
+      session &&
+      session.user &&
+      Number.isInteger(
+        Number(session.user.id)
+      ) &&
+      session.token
     ) {
-      state.user = user;
+      state.user = session.user;
+      state.token = String(session.token);
+      return;
     }
+
+    localStorage.removeItem(
+      "kaamsetu_session"
+    );
+
   } catch {
-    localStorage.removeItem("kaamsetu_user");
+    localStorage.removeItem(
+      "kaamsetu_session"
+    );
   }
 }
 
-function logout() {
+
+function clearSession() {
   state.user = null;
+  state.token = null;
+
   state.selectedWorker = null;
   state.nearbyWorkers = [];
+  state.currentBookings = [];
+  state.notifications = [];
 
   localStorage.removeItem(
-    "kaamsetu_user"
+    "kaamsetu_session"
   );
+}
+
+
+function handleExpiredSession() {
+  clearSession();
+  updateSessionUI();
+  renderApp();
+
+  showMessage(
+    "Your session has expired. Please login again.",
+    "error"
+  );
+}
+
+
+function logout() {
+  clearSession();
 
   updateSessionUI();
   renderApp();
@@ -187,6 +290,7 @@ function updateSessionUI() {
   if (!state.user) {
     session.innerHTML = `
       <button
+        type="button"
         class="secondary-btn"
         onclick="showAuth()"
       >
@@ -197,16 +301,19 @@ function updateSessionUI() {
     return;
   }
 
-  const role =
-    state.user.role
-      ? escapeHTML(state.user.role)
-      : "Account";
-
   const phone =
-    escapeHTML(state.user.phone || "");
+    escapeHTML(
+      state.user.phone || ""
+    );
+
+  const role =
+    escapeHTML(
+      state.user.role || "Account"
+    );
 
   session.innerHTML = `
     <div class="session-user">
+
       <span>
         ${phone}
       </span>
@@ -216,18 +323,20 @@ function updateSessionUI() {
       </small>
 
       <button
+        type="button"
         class="secondary-btn"
         onclick="logout()"
       >
         Logout
       </button>
+
     </div>
   `;
 }
 
 
 // ============================================================
-// AUTH MODAL
+// AUTH
 // ============================================================
 
 function showAuth() {
@@ -237,16 +346,24 @@ function showAuth() {
     document
       .getElementById("app")
       ?.scrollIntoView({
-        behavior: "smooth"
+        behavior: "smooth",
+        block: "start"
       });
 
     return;
   }
 
-  getApp().innerHTML = `
+  const app = getApp();
+
+  if (!app) {
+    return;
+  }
+
+  app.innerHTML = `
     <section class="auth-card">
 
       <div class="section-heading">
+
         <span class="eyebrow">
           KAAMSETU ACCOUNT
         </span>
@@ -256,8 +373,10 @@ function showAuth() {
         </h2>
 
         <p>
-          Enter your mobile number to continue.
+          Enter your 10 digit Indian mobile number
+          to continue.
         </p>
+
       </div>
 
       <form
@@ -265,7 +384,7 @@ function showAuth() {
         onsubmit="requestOTP(event)"
       >
 
-        <label>
+        <label for="phone-input">
           Mobile Number
         </label>
 
@@ -274,12 +393,15 @@ function showAuth() {
           type="tel"
           inputmode="numeric"
           maxlength="10"
+          minlength="10"
+          pattern="[0-9]{10}"
           placeholder="10 digit mobile number"
           autocomplete="tel"
           required
         >
 
         <button
+          id="send-otp-btn"
           type="submit"
           class="primary-btn"
         >
@@ -293,10 +415,10 @@ function showAuth() {
     </section>
   `;
 
-  getApp()
-    .scrollIntoView({
-      behavior: "smooth"
-    });
+  app.scrollIntoView({
+    behavior: "smooth",
+    block: "start"
+  });
 }
 
 
@@ -312,10 +434,14 @@ async function requestOTP(event) {
       "phone-input"
     );
 
+  const button =
+    document.getElementById(
+      "send-otp-btn"
+    );
+
   const phone =
     String(input?.value || "")
-      .replace(/\D/g, "")
-      .slice(-10);
+      .replace(/\D/g, "");
 
   if (!/^[0-9]{10}$/.test(phone)) {
     showMessage(
@@ -324,6 +450,11 @@ async function requestOTP(event) {
     );
 
     return;
+  }
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Sending OTP...";
   }
 
   try {
@@ -352,7 +483,7 @@ async function requestOTP(event) {
     otpArea.innerHTML = `
       <div class="otp-box">
 
-        <label>
+        <label for="otp-input">
           Enter OTP
         </label>
 
@@ -361,11 +492,15 @@ async function requestOTP(event) {
           type="text"
           inputmode="numeric"
           maxlength="6"
+          minlength="6"
+          pattern="[0-9]{6}"
           placeholder="6 digit OTP"
           autocomplete="one-time-code"
         >
 
         <button
+          id="verify-otp-btn"
+          type="button"
           class="primary-btn"
           onclick="verifyOTP()"
         >
@@ -375,7 +510,7 @@ async function requestOTP(event) {
         ${
           data.demoOtp
             ? `
-              <p>
+              <p class="demo-otp">
                 Development OTP:
                 <strong>
                   ${escapeHTML(data.demoOtp)}
@@ -385,6 +520,14 @@ async function requestOTP(event) {
             : ""
         }
 
+        <button
+          type="button"
+          class="secondary-btn"
+          onclick="showAuth()"
+        >
+          Change Number
+        </button>
+
       </div>
     `;
 
@@ -393,11 +536,24 @@ async function requestOTP(event) {
       "success"
     );
 
+    document
+      .getElementById("otp-input")
+      ?.focus();
+
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
+  } finally {
+
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Send OTP";
+    }
+
   }
 }
 
@@ -412,10 +568,14 @@ async function verifyOTP() {
       "otp-input"
     );
 
+  const button =
+    document.getElementById(
+      "verify-otp-btn"
+    );
+
   const otp =
     String(input?.value || "")
-      .replace(/\D/g, "")
-      .slice(0, 6);
+      .replace(/\D/g, "");
 
   if (!/^[0-9]{6}$/.test(otp)) {
     showMessage(
@@ -424,6 +584,20 @@ async function verifyOTP() {
     );
 
     return;
+  }
+
+  if (!state.otpPhone) {
+    showMessage(
+      "Please request a new OTP.",
+      "error"
+    );
+
+    return;
+  }
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Verifying...";
   }
 
   try {
@@ -439,7 +613,19 @@ async function verifyOTP() {
         }
       );
 
+    if (
+      !data.user ||
+      !data.token
+    ) {
+      throw new Error(
+        "Login response was incomplete."
+      );
+    }
+
     state.user = data.user;
+    state.token = data.token;
+
+    state.otpPhone = "";
 
     saveSession();
     updateSessionUI();
@@ -452,27 +638,54 @@ async function verifyOTP() {
     renderApp();
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
+  } finally {
+
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Verify OTP";
+    }
+
   }
 }
 
 
 // ============================================================
-// ROLE SELECTION
+// ROLE
 // ============================================================
 
 async function selectRole(role) {
+  const normalizedRole =
+    String(role || "")
+      .trim()
+      .toLowerCase();
+
+  if (
+    !["customer", "worker"]
+      .includes(normalizedRole)
+  ) {
+    showMessage(
+      "Invalid account type.",
+      "error"
+    );
+
+    return;
+  }
+
   try {
+
     const data =
       await apiRequest(
         "/auth/select-role",
         {
           method: "POST",
           body: JSON.stringify({
-            role
+            role: normalizedRole
           })
         }
       );
@@ -480,26 +693,35 @@ async function selectRole(role) {
     state.user.role =
       data.role;
 
+    if (data.token) {
+      state.token =
+        data.token;
+    }
+
     saveSession();
     updateSessionUI();
     renderApp();
 
     showMessage(
-      `Account selected as ${role}.`,
+      normalizedRole === "customer"
+        ? "Customer account selected."
+        : "Worker account selected.",
       "success"
     );
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
   }
 }
 
 
 // ============================================================
-// MAIN APP RENDER
+// MAIN RENDER
 // ============================================================
 
 function renderApp() {
@@ -534,11 +756,17 @@ function renderApp() {
 
 
 // ============================================================
-// ROLE SELECTION SCREEN
+// ROLE SELECTION
 // ============================================================
 
 function renderRoleSelection() {
-  getApp().innerHTML = `
+  const app = getApp();
+
+  if (!app) {
+    return;
+  }
+
+  app.innerHTML = `
     <section class="auth-card">
 
       <div class="section-heading">
@@ -560,9 +788,11 @@ function renderRoleSelection() {
       <div class="role-grid">
 
         <button
+          type="button"
           class="service-card"
           onclick="selectRole('customer')"
         >
+
           <span>🏠</span>
 
           <b>
@@ -572,12 +802,15 @@ function renderRoleSelection() {
           <small>
             I need a service professional.
           </small>
+
         </button>
 
         <button
+          type="button"
           class="service-card"
           onclick="selectRole('worker')"
         >
+
           <span>🛠️</span>
 
           <b>
@@ -587,6 +820,7 @@ function renderRoleSelection() {
           <small>
             I provide professional services.
           </small>
+
         </button>
 
       </div>
@@ -597,11 +831,39 @@ function renderRoleSelection() {
 
 
 // ============================================================
+// SERVICE OPTIONS
+// ============================================================
+
+function serviceOptions(selected = "") {
+  return `
+    <option value="">
+      Choose a service
+    </option>
+
+    ${SERVICES.map(service => `
+      <option
+        value="${escapeHTML(service)}"
+        ${service === selected ? "selected" : ""}
+      >
+        ${escapeHTML(service)}
+      </option>
+    `).join("")}
+  `;
+}
+
+
+// ============================================================
 // CUSTOMER DASHBOARD
 // ============================================================
 
 function renderCustomerDashboard() {
-  getApp().innerHTML = `
+  const app = getApp();
+
+  if (!app) {
+    return;
+  }
+
+  app.innerHTML = `
     <section class="dashboard-card">
 
       <div class="section-heading">
@@ -615,8 +877,8 @@ function renderCustomerDashboard() {
         </h2>
 
         <p>
-          Select a service and find approved
-          workers near your location.
+          Find approved and verified workers
+          near your location.
         </p>
 
       </div>
@@ -624,6 +886,7 @@ function renderCustomerDashboard() {
       <div class="dashboard-actions">
 
         <button
+          type="button"
           class="primary-btn"
           onclick="locate()"
         >
@@ -631,6 +894,7 @@ function renderCustomerDashboard() {
         </button>
 
         <button
+          type="button"
           class="secondary-btn"
           onclick="loadMyBookings()"
         >
@@ -638,6 +902,7 @@ function renderCustomerDashboard() {
         </button>
 
         <button
+          type="button"
           class="secondary-btn"
           onclick="loadNotifications()"
         >
@@ -672,51 +937,20 @@ function renderCustomerHome() {
   content.innerHTML = `
     <div class="booking-search">
 
-      <label>
+      <label for="customer-category">
         Select service
       </label>
 
-      <select id="customer-category">
-
-        <option value="">
-          Choose a service
-        </option>
-
-        <option>
-          Plumber
-        </option>
-
-        <option>
-          Electrician
-        </option>
-
-        <option>
-          Carpenter
-        </option>
-
-        <option>
-          Painter
-        </option>
-
-        <option>
-          Cleaner
-        </option>
-
-        <option>
-          AC Technician
-        </option>
-
-        <option>
-          Mechanic
-        </option>
-
-        <option>
-          General Labour
-        </option>
-
+      <select
+        id="customer-category"
+      >
+        ${serviceOptions(
+          state.selectedService
+        )}
       </select>
 
       <button
+        type="button"
         class="primary-btn"
         onclick="findWorkersFromForm()"
       >
@@ -731,11 +965,23 @@ function renderCustomerHome() {
 
 
 // ============================================================
-// SERVICE SELECT FROM HERO CARDS
+// HERO SERVICE
 // ============================================================
 
 function selectService(category) {
-  state.selectedService = category;
+  const service =
+    String(category || "").trim();
+
+  if (!SERVICES.includes(service)) {
+    showMessage(
+      "This service is not available.",
+      "error"
+    );
+
+    return;
+  }
+
+  state.selectedService = service;
 
   if (!state.user) {
     showAuth();
@@ -759,7 +1005,7 @@ function selectService(category) {
     );
 
   if (select) {
-    select.value = category;
+    select.value = service;
   }
 
   locate();
@@ -767,7 +1013,7 @@ function selectService(category) {
 
 
 // ============================================================
-// FIND WORKERS FROM FORM
+// FIND WORKERS
 // ============================================================
 
 async function findWorkersFromForm() {
@@ -795,7 +1041,7 @@ async function findWorkersFromForm() {
 
 
 // ============================================================
-// GPS LOCATION
+// CUSTOMER GPS
 // ============================================================
 
 function locate() {
@@ -806,7 +1052,7 @@ function locate() {
 
   if (state.user.role !== "customer") {
     showMessage(
-      "GPS worker search is available for customers.",
+      "Nearby worker search is available for customers.",
       "error"
     );
 
@@ -836,7 +1082,6 @@ function locate() {
     );
 
     renderCustomerDashboard();
-
     return;
   }
 
@@ -858,40 +1103,49 @@ function locate() {
       );
 
     },
-    error => {
 
-      let message =
-        "Unable to get your location.";
+    error => {
 
       if (
         error.code ===
         error.PERMISSION_DENIED
       ) {
-        message =
-          "Location permission was denied. Please allow GPS access.";
+        showMessage(
+          "Location permission was denied. Please allow GPS access.",
+          "error"
+        );
+        return;
       }
 
       if (
         error.code ===
         error.POSITION_UNAVAILABLE
       ) {
-        message =
-          "Your location is currently unavailable.";
+        showMessage(
+          "Your location is currently unavailable.",
+          "error"
+        );
+        return;
       }
 
       if (
         error.code ===
         error.TIMEOUT
       ) {
-        message =
-          "Location request timed out.";
+        showMessage(
+          "Location request timed out. Please try again.",
+          "error"
+        );
+        return;
       }
 
       showMessage(
-        message,
+        "Unable to get your location.",
         "error"
       );
+
     },
+
     {
       enableHighAccuracy: true,
       timeout: 15000,
@@ -902,24 +1156,34 @@ function locate() {
 
 
 // ============================================================
-// NEARBY WORKER SEARCH
+// NEARBY WORKERS
 // ============================================================
 
-async function findNearbyWorkers(
-  category
-) {
+async function findNearbyWorkers(category) {
   if (!state.customerLocation) {
+    showMessage(
+      "Customer location is unavailable.",
+      "error"
+    );
+
     return;
   }
 
   const params =
     new URLSearchParams({
-      lat: state.customerLocation.lat,
-      lng: state.customerLocation.lng,
+      lat: String(
+        state.customerLocation.lat
+      ),
+
+      lng: String(
+        state.customerLocation.lng
+      ),
+
       category
     });
 
   try {
+
     const data =
       await apiRequest(
         `/workers/nearby?${params.toString()}`
@@ -930,20 +1194,26 @@ async function findNearbyWorkers(
         ? data.workers
         : [];
 
-    renderWorkerResults();
+    renderWorkerResults(
+      data.rangeUsedKm
+    );
 
-    if (!state.nearbyWorkers.length) {
+    if (
+      !state.nearbyWorkers.length
+    ) {
       showMessage(
-        "No approved available worker was found in the available search range.",
+        "No approved and available worker was found nearby.",
         "info"
       );
     }
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
   }
 }
 
@@ -952,7 +1222,7 @@ async function findNearbyWorkers(
 // WORKER RESULTS
 // ============================================================
 
-function renderWorkerResults() {
+function renderWorkerResults(rangeUsedKm = null) {
   const results =
     document.getElementById(
       "worker-results"
@@ -965,13 +1235,15 @@ function renderWorkerResults() {
   if (!state.nearbyWorkers.length) {
     results.innerHTML = `
       <div class="empty-state">
+
         <h3>
           No workers found
         </h3>
 
         <p>
-          Please try another service or search again later.
+          Try another service or search again later.
         </p>
+
       </div>
     `;
 
@@ -980,6 +1252,7 @@ function renderWorkerResults() {
 
   results.innerHTML = `
     <div class="section-heading">
+
       <span class="eyebrow">
         AVAILABLE WORKERS
       </span>
@@ -988,75 +1261,107 @@ function renderWorkerResults() {
         Professionals near you
       </h3>
 
-      <p>
-        KaamSetu prioritizes the nearest successful GPS range.
-      </p>
+      ${
+        rangeUsedKm
+          ? `
+            <p>
+              Workers found within
+              ${escapeHTML(rangeUsedKm)} km.
+            </p>
+          `
+          : ""
+      }
+
     </div>
 
     <div class="worker-grid">
 
       ${state.nearbyWorkers
-        .map(worker => `
-          <article class="worker-card">
+        .map(worker => {
 
-            <div class="worker-avatar">
-              🛠️
-            </div>
+          const rating =
+            Number(worker.rating || 0)
+              .toFixed(1);
 
-            <h3>
-              ${escapeHTML(worker.name)}
-            </h3>
+          const distance =
+            worker.distanceKm !== null &&
+            worker.distanceKm !== undefined
+              ? `${escapeHTML(worker.distanceKm)} km`
+              : "Nearby";
 
-            <p>
-              ${escapeHTML(worker.category)}
-            </p>
+          return `
+            <article class="worker-card">
 
-            <div class="worker-info">
+              <div class="worker-avatar">
+                🛠️
+              </div>
 
-              <span>
-                ⭐ ${escapeHTML(worker.rating)}
-              </span>
+              <h3>
+                ${escapeHTML(worker.name)}
+              </h3>
 
-              <span>
-                📍 ${escapeHTML(worker.distanceKm)} km
-              </span>
+              <p>
+                ${escapeHTML(worker.category)}
+              </p>
 
-              <span>
-                ₹${escapeHTML(worker.rate)}
-              </span>
+              <div class="worker-info">
 
-            </div>
+                <span>
+                  ⭐ ${escapeHTML(rating)}
+                </span>
 
-            ${
-              worker.skills
-                ? `
-                  <p>
-                    ${escapeHTML(worker.skills)}
-                  </p>
-                `
-                : ""
-            }
+                <span>
+                  📍 ${distance}
+                </span>
 
-            ${
-              worker.experience !== undefined
-                ? `
-                  <small>
-                    ${escapeHTML(worker.experience)}
-                    years experience
-                  </small>
-                `
-                : ""
-            }
+                <span>
+                  ${money(worker.rate)}
+                </span>
 
-            <button
-              class="primary-btn"
-              onclick="openBooking(${Number(worker.id)})"
-            >
-              Appoint Worker
-            </button>
+              </div>
 
-          </article>
-        `)
+              ${
+                worker.skills
+                  ? `
+                    <p>
+                      ${escapeHTML(worker.skills)}
+                    </p>
+                  `
+                  : ""
+              }
+
+              ${
+                worker.experience !== undefined
+                  ? `
+                    <small>
+                      ${escapeHTML(worker.experience)}
+                      years experience
+                    </small>
+                  `
+                  : ""
+              }
+
+              ${
+                worker.verified
+                  ? `
+                    <div class="booking-warning">
+                      ✓ KaamSetu Verified
+                    </div>
+                  `
+                  : ""
+              }
+
+              <button
+                type="button"
+                class="primary-btn"
+                onclick="openBooking(${Number(worker.id)})"
+              >
+                Appoint Worker
+              </button>
+
+            </article>
+          `;
+        })
         .join("")}
 
     </div>
@@ -1065,7 +1370,7 @@ function renderWorkerResults() {
 
 
 // ============================================================
-// BOOKING FORM
+// OPEN BOOKING
 // ============================================================
 
 function openBooking(workerId) {
@@ -1127,12 +1432,19 @@ function openBooking(workerId) {
         <p>
           Platform fee:
           <strong>
-            Calculated securely by KaamSetu
+            Calculated by KaamSetu
           </strong>
         </p>
 
         <p>
-          Final customer total:
+          Loyalty discount:
+          <strong>
+            Calculated by KaamSetu
+          </strong>
+        </p>
+
+        <p>
+          Customer total:
           <strong>
             Calculated after booking
           </strong>
@@ -1144,7 +1456,7 @@ function openBooking(workerId) {
         onsubmit="createBooking(event)"
       >
 
-        <label>
+        <label for="booking-description">
           Work description
         </label>
 
@@ -1155,7 +1467,7 @@ function openBooking(workerId) {
           placeholder="Describe what needs to be done..."
         ></textarea>
 
-        <label>
+        <label for="booking-address">
           Work address
         </label>
 
@@ -1166,7 +1478,7 @@ function openBooking(workerId) {
           placeholder="Enter the complete work address..."
         ></textarea>
 
-        <label>
+        <label for="booking-duration">
           Work type / duration
         </label>
 
@@ -1197,7 +1509,7 @@ function openBooking(workerId) {
 
         </select>
 
-        <label>
+        <label for="booking-payment">
           Payment method
         </label>
 
@@ -1217,11 +1529,12 @@ function openBooking(workerId) {
         </select>
 
         <div class="booking-warning">
-          Worker contact details are revealed only
-          after the worker accepts the booking.
+          Worker contact details remain protected
+          until the booking is accepted.
         </div>
 
         <button
+          id="confirm-booking-btn"
           type="submit"
           class="primary-btn"
         >
@@ -1279,7 +1592,12 @@ async function createBooking(event) {
       "booking-payment"
     )?.value;
 
-  if (!description || !address || !duration) {
+  if (
+    !description ||
+    !address ||
+    !duration ||
+    !paymentMethod
+  ) {
     showMessage(
       "Please complete all booking details.",
       "error"
@@ -1288,13 +1606,26 @@ async function createBooking(event) {
     return;
   }
 
+  const button =
+    document.getElementById(
+      "confirm-booking-btn"
+    );
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Creating Booking...";
+  }
+
   try {
+
     const data =
       await apiRequest(
         "/bookings",
         {
           method: "POST",
+
           body: JSON.stringify({
+
             workerId:
               Number(
                 state.selectedWorker.id
@@ -1318,6 +1649,7 @@ async function createBooking(event) {
             lng:
               state.customerLocation?.lng ??
               null
+
           })
         }
       );
@@ -1329,10 +1661,19 @@ async function createBooking(event) {
     );
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
+  } finally {
+
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Confirm Appointment";
+    }
+
   }
 }
 
@@ -1341,9 +1682,7 @@ async function createBooking(event) {
 // BOOKING CONFIRMATION
 // ============================================================
 
-function renderBookingConfirmation(
-  data
-) {
+function renderBookingConfirmation(data) {
   const content =
     document.getElementById(
       "customer-content"
@@ -1356,6 +1695,12 @@ function renderBookingConfirmation(
   const pricing =
     data.pricing || {};
 
+  const firstBooking =
+    data.offers?.firstBookingFeeWaived;
+
+  const loyaltyApplied =
+    data.offers?.loyaltyApplied;
+
   content.innerHTML = `
     <div class="booking-card">
 
@@ -1366,7 +1711,7 @@ function renderBookingConfirmation(
         </span>
 
         <h3>
-          Appointment request sent
+          Appointment request created
         </h3>
 
         <p>
@@ -1392,6 +1737,13 @@ function renderBookingConfirmation(
         </p>
 
         <p>
+          Loyalty discount:
+          <strong>
+            ${money(pricing.loyaltyDiscount)}
+          </strong>
+        </p>
+
+        <p>
           Customer total:
           <strong>
             ${money(pricing.customerTotal)}
@@ -1400,6 +1752,26 @@ function renderBookingConfirmation(
 
       </div>
 
+      ${
+        firstBooking
+          ? `
+            <div class="booking-warning">
+              🎉 First-booking platform fee waived.
+            </div>
+          `
+          : ""
+      }
+
+      ${
+        loyaltyApplied
+          ? `
+            <div class="booking-warning">
+              🎁 Loyalty discount applied.
+            </div>
+          `
+          : ""
+      }
+
       <div class="booking-code-box">
 
         <h3>
@@ -1407,9 +1779,8 @@ function renderBookingConfirmation(
         </h3>
 
         <p>
-          Keep this code safe.
-          The appointed worker will need it
-          to complete the job.
+          Keep this 6 digit code safe.
+          You will need it when the job is completed.
         </p>
 
         <strong class="completion-code">
@@ -1423,16 +1794,13 @@ function renderBookingConfirmation(
         ${
           data.paymentMethod === "online"
             ? `
-              Online payment is selected.
-              Payment must be completed through the
-              configured payment gateway before the worker
-              can accept the booking.
+              Online payment is required before
+              the worker can accept this booking.
             `
             : `
               Cash payment selected.
-              The worker will receive the booking request
-              and contact details become available after
-              acceptance.
+              The worker can accept the request
+              according to the booking rules.
             `
         }
 
@@ -1442,6 +1810,7 @@ function renderBookingConfirmation(
         data.paymentMethod === "online"
           ? `
             <button
+              type="button"
               class="primary-btn"
               onclick="startOnlinePayment(${Number(data.bookingId)})"
             >
@@ -1452,6 +1821,7 @@ function renderBookingConfirmation(
       }
 
       <button
+        type="button"
         class="secondary-btn"
         onclick="loadMyBookings()"
       >
@@ -1464,20 +1834,113 @@ function renderBookingConfirmation(
 
 
 // ============================================================
+// RAZORPAY SCRIPT
+// ============================================================
+
+function loadRazorpayScript() {
+  return new Promise((resolve, reject) => {
+
+    if (
+      typeof window.Razorpay ===
+      "function"
+    ) {
+      resolve(true);
+      return;
+    }
+
+    const existing =
+      document.querySelector(
+        'script[data-kaamsetu-razorpay="true"]'
+      );
+
+    if (existing) {
+      existing.addEventListener(
+        "load",
+        () => resolve(true),
+        { once: true }
+      );
+
+      existing.addEventListener(
+        "error",
+        () =>
+          reject(
+            new Error(
+              "Unable to load payment gateway."
+            )
+          ),
+        { once: true }
+      );
+
+      return;
+    }
+
+    const script =
+      document.createElement("script");
+
+    script.src =
+      "https://checkout.razorpay.com/v1/checkout.js";
+
+    script.async = true;
+
+    script.dataset.kaamsetuRazorpay =
+      "true";
+
+    script.onload = () => {
+      if (
+        typeof window.Razorpay ===
+        "function"
+      ) {
+        resolve(true);
+      } else {
+        reject(
+          new Error(
+            "Payment gateway failed to load."
+          )
+        );
+      }
+    };
+
+    script.onerror = () => {
+      reject(
+        new Error(
+          "Unable to load Razorpay checkout."
+        )
+      );
+    };
+
+    document.head.appendChild(script);
+  });
+}
+
+
+// ============================================================
 // ONLINE PAYMENT
 // ============================================================
 
-async function startOnlinePayment(
-  bookingId
-) {
+async function startOnlinePayment(bookingId) {
+  const id = Number(bookingId);
+
+  if (
+    !Number.isInteger(id) ||
+    id <= 0
+  ) {
+    showMessage(
+      "Invalid booking.",
+      "error"
+    );
+
+    return;
+  }
+
   try {
+
     const data =
       await apiRequest(
         "/payments/create",
         {
           method: "POST",
           body: JSON.stringify({
-            bookingId
+            bookingId: id
           })
         }
       );
@@ -1488,20 +1951,127 @@ async function startOnlinePayment(
         "success"
       );
 
+      await loadMyBookings();
       return;
     }
 
-    showMessage(
-      data.message ||
-      "Online payment gateway is not configured yet.",
-      "info"
+    if (
+      data.gateway !== "razorpay" ||
+      !data.keyId ||
+      !data.orderId
+    ) {
+      throw new Error(
+        "Online payment gateway response is incomplete."
+      );
+    }
+
+    await loadRazorpayScript();
+
+    const options = {
+
+      key: data.keyId,
+
+      amount: Number(data.amount),
+
+      currency:
+        data.currency || "INR",
+
+      name: "KaamSetu",
+
+      description:
+        `KaamSetu Booking #${id}`,
+
+      order_id:
+        data.orderId,
+
+      handler: async function (response) {
+
+        try {
+
+          showMessage(
+            "Verifying payment...",
+            "info"
+          );
+
+          await apiRequest(
+            "/payments/verify",
+            {
+              method: "POST",
+
+              body: JSON.stringify({
+
+                bookingId: id,
+
+                razorpay_order_id:
+                  response.razorpay_order_id,
+
+                razorpay_payment_id:
+                  response.razorpay_payment_id,
+
+                razorpay_signature:
+                  response.razorpay_signature
+
+              })
+            }
+          );
+
+          showMessage(
+            "Payment successful and verified.",
+            "success"
+          );
+
+          await loadMyBookings();
+
+        } catch (error) {
+
+          showMessage(
+            error.message,
+            "error"
+          );
+
+        }
+
+      },
+
+      modal: {
+        ondismiss: function () {
+          showMessage(
+            "Payment window closed.",
+            "info"
+          );
+        }
+      },
+
+      theme: {
+        color: "#f97316"
+      }
+
+    };
+
+    const razorpay =
+      new window.Razorpay(
+        options
+      );
+
+    razorpay.on(
+      "payment.failed",
+      function () {
+        showMessage(
+          "Payment failed. Please try again.",
+          "error"
+        );
+      }
     );
 
+    razorpay.open();
+
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
   }
 }
 
@@ -1517,6 +2087,7 @@ async function loadMyBookings() {
   }
 
   try {
+
     const data =
       await apiRequest(
         "/bookings/my"
@@ -1527,19 +2098,28 @@ async function loadMyBookings() {
         ? data.bookings
         : [];
 
-    renderMyBookings();
+    if (
+      state.user.role ===
+      "worker"
+    ) {
+      renderWorkerBookings();
+    } else {
+      renderMyBookings();
+    }
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
   }
 }
 
 
 // ============================================================
-// RENDER CUSTOMER BOOKINGS
+// CUSTOMER BOOKINGS UI
 // ============================================================
 
 function renderMyBookings() {
@@ -1561,10 +2141,11 @@ function renderMyBookings() {
         </h3>
 
         <p>
-          Your bookings will appear here.
+          Your appointments will appear here.
         </p>
 
         <button
+          type="button"
           class="primary-btn"
           onclick="renderCustomerHome()"
         >
@@ -1596,6 +2177,9 @@ function renderMyBookings() {
         .map(booking => {
 
           const canContact =
+            Boolean(
+              booking.worker_phone_revealed
+            ) ||
             [
               "accepted",
               "in_progress",
@@ -1614,44 +2198,114 @@ function renderMyBookings() {
               </h3>
 
               <p>
-                Booking #${escapeHTML(booking.id)}
+                Booking #
+                ${escapeHTML(booking.id)}
               </p>
 
               <p>
                 Status:
                 <strong>
-                  ${escapeHTML(booking.status)}
+                  ${escapeHTML(
+                    statusLabel(
+                      booking.status
+                    )
+                  )}
                 </strong>
               </p>
 
               <p>
+                Service:
+                ${escapeHTML(
+                  booking.category
+                )}
+              </p>
+
+              <p>
+                Work:
+                ${escapeHTML(
+                  booking.description
+                )}
+              </p>
+
+              <p>
+                Address:
+                ${escapeHTML(
+                  booking.address
+                )}
+              </p>
+
+              <p>
+                Duration:
+                ${escapeHTML(
+                  booking.duration
+                )}
+              </p>
+
+              <p>
                 Worker price:
-                ${money(booking.worker_price)}
+                ${money(
+                  booking.worker_price
+                )}
               </p>
 
               <p>
                 Platform fee:
-                ${money(booking.platform_fee)}
+                ${money(
+                  booking.platform_fee
+                )}
+              </p>
+
+              <p>
+                Discount:
+                ${money(
+                  booking.discount
+                )}
               </p>
 
               <p>
                 Total:
                 <strong>
-                  ${money(booking.customer_total)}
+                  ${money(
+                    booking.customer_total
+                  )}
                 </strong>
               </p>
 
               <p>
                 Payment:
-                ${escapeHTML(booking.payment_method)}
+                ${escapeHTML(
+                  booking.payment_method
+                )}
                 /
-                ${escapeHTML(booking.payment_status)}
+                ${escapeHTML(
+                  booking.payment_status
+                )}
               </p>
+
+              ${
+                booking.payment_method ===
+                  "online" &&
+                booking.payment_status !==
+                  "paid" &&
+                booking.status !==
+                  "cancelled"
+                  ? `
+                    <button
+                      type="button"
+                      class="primary-btn"
+                      onclick="startOnlinePayment(${Number(booking.id)})"
+                    >
+                      Pay Online
+                    </button>
+                  `
+                  : ""
+              }
 
               ${
                 canContact
                   ? `
                     <button
+                      type="button"
                       class="primary-btn"
                       onclick="getWorkerContact(${Number(booking.id)})"
                     >
@@ -1666,6 +2320,40 @@ function renderMyBookings() {
                   `
               }
 
+              ${
+                ![
+                  "completed",
+                  "cancelled"
+                ].includes(
+                  booking.status
+                )
+                  ? `
+                    <button
+                      type="button"
+                      class="secondary-btn"
+                      onclick="cancelBooking(${Number(booking.id)})"
+                    >
+                      Cancel Booking
+                    </button>
+                  `
+                  : ""
+              }
+
+              ${
+                booking.created_at
+                  ? `
+                    <small>
+                      Created:
+                      ${escapeHTML(
+                        formatDate(
+                          booking.created_at
+                        )
+                      )}
+                    </small>
+                  `
+                  : ""
+              }
+
             </article>
           `;
         })
@@ -1677,36 +2365,40 @@ function renderMyBookings() {
 
 
 // ============================================================
-// GET WORKER CONTACT
+// WORKER CONTACT
 // ============================================================
 
-async function getWorkerContact(
-  bookingId
-) {
+async function getWorkerContact(bookingId) {
   try {
+
     const data =
       await apiRequest(
         `/bookings/${Number(bookingId)}/contact`
       );
 
     const phone =
-      String(data.workerPhone || "");
+      String(
+        data.workerPhone || ""
+      );
 
-    if (!phone) {
+    if (!/^[0-9]{10}$/.test(phone)) {
       throw new Error(
         "Worker phone number is unavailable."
       );
     }
 
     showPhoneDialog(
-      phone
+      phone,
+      "Worker Contact"
     );
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
   }
 }
 
@@ -1716,7 +2408,8 @@ async function getWorkerContact(
 // ============================================================
 
 function showPhoneDialog(
-  phone
+  phone,
+  title = "Contact"
 ) {
   const old =
     document.getElementById(
@@ -1737,15 +2430,19 @@ function showPhoneDialog(
     "ks-modal-overlay";
 
   overlay.innerHTML = `
-    <div class="ks-modal">
+    <div
+      class="ks-modal"
+      role="dialog"
+      aria-modal="true"
+    >
 
       <h3>
-        Worker Contact
+        ${escapeHTML(title)}
       </h3>
 
       <p>
-        You can contact your appointed worker
-        using this number.
+        Contact details are available
+        for this accepted booking.
       </p>
 
       <a
@@ -1756,8 +2453,9 @@ function showPhoneDialog(
       </a>
 
       <button
+        type="button"
         class="secondary-btn"
-        onclick="document.getElementById('ks-phone-dialog').remove()"
+        onclick="closePhoneDialog()"
       >
         Close
       </button>
@@ -1771,12 +2469,22 @@ function showPhoneDialog(
 }
 
 
+function closePhoneDialog() {
+  document
+    .getElementById(
+      "ks-phone-dialog"
+    )
+    ?.remove();
+}
+
+
 // ============================================================
 // NOTIFICATIONS
 // ============================================================
 
 async function loadNotifications() {
   try {
+
     const data =
       await apiRequest(
         "/notifications"
@@ -1790,17 +2498,15 @@ async function loadNotifications() {
     renderNotifications();
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
   }
 }
 
-
-// ============================================================
-// RENDER NOTIFICATIONS
-// ============================================================
 
 function renderNotifications() {
   const content =
@@ -1819,6 +2525,14 @@ function renderNotifications() {
         <h3>
           No notifications
         </h3>
+
+        <button
+          type="button"
+          class="primary-btn"
+          onclick="renderCustomerHome()"
+        >
+          Back
+        </button>
 
       </div>
     `;
@@ -1843,24 +2557,38 @@ function renderNotifications() {
 
       ${state.notifications
         .map(notification => `
-          <article class="notification-card">
+
+          <article
+            class="notification-card"
+          >
 
             <strong>
-              ${escapeHTML(notification.type)}
+              ${escapeHTML(
+                notification.type
+              )}
             </strong>
 
             <p>
-              ${escapeHTML(notification.message)}
+              ${escapeHTML(
+                notification.message
+              )}
             </p>
 
             <small>
-              ${escapeHTML(notification.created_at)}
+              ${escapeHTML(
+                formatDate(
+                  notification.created_at
+                )
+              )}
             </small>
 
             ${
-              !notification.read
+              !Number(
+                notification.read
+              )
                 ? `
                   <button
+                    type="button"
                     class="secondary-btn"
                     onclick="markNotificationRead(${Number(notification.id)})"
                   >
@@ -1869,12 +2597,13 @@ function renderNotifications() {
                 `
                 : `
                   <small>
-                    Read
+                    ✓ Read
                   </small>
                 `
             }
 
           </article>
+
         `)
         .join("")}
 
@@ -1883,14 +2612,11 @@ function renderNotifications() {
 }
 
 
-// ============================================================
-// MARK NOTIFICATION READ
-// ============================================================
-
 async function markNotificationRead(
   notificationId
 ) {
   try {
+
     await apiRequest(
       `/notifications/${Number(notificationId)}/read`,
       {
@@ -1901,10 +2627,69 @@ async function markNotificationRead(
     await loadNotifications();
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
+  }
+}
+
+
+// ============================================================
+// CUSTOMER CANCEL BOOKING
+// ============================================================
+
+async function cancelBooking(
+  bookingId
+) {
+  const confirmed =
+    window.confirm(
+      "Are you sure you want to cancel this booking?"
+    );
+
+  if (!confirmed) {
+    return;
+  }
+
+  const reason =
+    window.prompt(
+      "Cancellation reason (optional):",
+      "Cancelled by customer"
+    );
+
+  try {
+
+    await apiRequest(
+      `/bookings/${Number(bookingId)}/cancel`,
+      {
+        method: "POST",
+
+        body: JSON.stringify({
+          reason:
+            String(
+              reason || ""
+            ).trim() ||
+            "Cancelled by customer"
+        })
+      }
+    );
+
+    showMessage(
+      "Booking cancelled successfully.",
+      "success"
+    );
+
+    await loadMyBookings();
+
+  } catch (error) {
+
+    showMessage(
+      error.message,
+      "error"
+    );
+
   }
 }
 
@@ -1914,7 +2699,13 @@ async function markNotificationRead(
 // ============================================================
 
 function renderWorkerDashboard() {
-  getApp().innerHTML = `
+  const app = getApp();
+
+  if (!app) {
+    return;
+  }
+
+  app.innerHTML = `
     <section class="dashboard-card">
 
       <div class="section-heading">
@@ -1928,8 +2719,8 @@ function renderWorkerDashboard() {
         </h2>
 
         <p>
-          Complete your profile, stay available,
-          and manage customer requests.
+          Manage your profile, GPS,
+          availability and customer requests.
         </p>
 
       </div>
@@ -1937,6 +2728,7 @@ function renderWorkerDashboard() {
       <div class="dashboard-actions">
 
         <button
+          type="button"
           class="primary-btn"
           onclick="renderWorkerProfile()"
         >
@@ -1944,6 +2736,7 @@ function renderWorkerDashboard() {
         </button>
 
         <button
+          type="button"
           class="secondary-btn"
           onclick="loadWorkerBookings()"
         >
@@ -1951,6 +2744,7 @@ function renderWorkerDashboard() {
         </button>
 
         <button
+          type="button"
           class="secondary-btn"
           onclick="updateWorkerLocation()"
         >
@@ -1958,6 +2752,15 @@ function renderWorkerDashboard() {
         </button>
 
         <button
+          type="button"
+          class="secondary-btn"
+          onclick="loadWorkerWallet()"
+        >
+          Wallet
+        </button>
+
+        <button
+          type="button"
           class="secondary-btn"
           onclick="loadWorkerNotifications()"
         >
@@ -1997,14 +2800,24 @@ function renderWorkerHome() {
       </h3>
 
       <p>
-        Submit your worker profile for admin approval.
+        Complete your worker profile,
+        update your GPS and wait for admin approval.
       </p>
 
       <button
+        type="button"
         class="primary-btn"
         onclick="renderWorkerProfile()"
       >
         Create / Update Profile
+      </button>
+
+      <button
+        type="button"
+        class="secondary-btn"
+        onclick="updateWorkerLocation()"
+      >
+        📍 Update GPS Location
       </button>
 
     </div>
@@ -2039,13 +2852,18 @@ function renderWorkerProfile() {
           Register your service
         </h3>
 
+        <p>
+          Customers can see your profile only
+          after the required admin approval.
+        </p>
+
       </div>
 
       <form
         onsubmit="registerWorker(event)"
       >
 
-        <label>
+        <label for="worker-name">
           Name
         </label>
 
@@ -2057,7 +2875,7 @@ function renderWorkerProfile() {
           placeholder="Your full name"
         >
 
-        <label>
+        <label for="worker-category">
           Service category
         </label>
 
@@ -2066,45 +2884,11 @@ function renderWorkerProfile() {
           required
         >
 
-          <option value="">
-            Select category
-          </option>
-
-          <option>
-            Plumber
-          </option>
-
-          <option>
-            Electrician
-          </option>
-
-          <option>
-            Carpenter
-          </option>
-
-          <option>
-            Painter
-          </option>
-
-          <option>
-            Cleaner
-          </option>
-
-          <option>
-            AC Technician
-          </option>
-
-          <option>
-            Mechanic
-          </option>
-
-          <option>
-            General Labour
-          </option>
+          ${serviceOptions()}
 
         </select>
 
-        <label>
+        <label for="worker-skills">
           Skills
         </label>
 
@@ -2115,7 +2899,7 @@ function renderWorkerProfile() {
           placeholder="e.g. Pipe repair, fitting, leakage"
         >
 
-        <label>
+        <label for="worker-experience">
           Experience in years
         </label>
 
@@ -2129,7 +2913,7 @@ function renderWorkerProfile() {
           value="0"
         >
 
-        <label>
+        <label for="worker-rate">
           Your service price
         </label>
 
@@ -2143,7 +2927,7 @@ function renderWorkerProfile() {
           placeholder="₹500"
         >
 
-        <label>
+        <label for="worker-bio">
           About you
         </label>
 
@@ -2154,6 +2938,7 @@ function renderWorkerProfile() {
         ></textarea>
 
         <button
+          id="worker-submit-btn"
           type="submit"
           class="primary-btn"
         >
@@ -2164,8 +2949,8 @@ function renderWorkerProfile() {
 
       <div class="booking-warning">
 
-        Worker profiles are not visible to customers
-        until they are approved by the KaamSetu admin.
+        Worker profiles are visible to customers
+        only after admin approval and verification.
 
       </div>
 
@@ -2218,6 +3003,7 @@ async function registerWorker(event) {
   if (
     !name ||
     !category ||
+    !SERVICES.includes(category) ||
     !Number.isFinite(experience) ||
     !Number.isFinite(rate)
   ) {
@@ -2229,23 +3015,28 @@ async function registerWorker(event) {
     return;
   }
 
-  let lat = null;
-  let lng = null;
+  // IMPORTANT:
+  // Worker registration must NOT use customerLocation.
+  // Current server.js accepts worker GPS through
+  // /workers/location separately.
+  const button =
+    document.getElementById(
+      "worker-submit-btn"
+    );
 
-  if (state.customerLocation) {
-    lat =
-      state.customerLocation.lat;
-
-    lng =
-      state.customerLocation.lng;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Submitting...";
   }
 
   try {
+
     const data =
       await apiRequest(
         "/workers/register",
         {
           method: "POST",
+
           body: JSON.stringify({
             name,
             category,
@@ -2253,8 +3044,8 @@ async function registerWorker(event) {
             experience,
             rate,
             bio,
-            lat,
-            lng
+            lat: null,
+            lng: null
           })
         }
       );
@@ -2268,10 +3059,20 @@ async function registerWorker(event) {
     renderWorkerHome();
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
+  } finally {
+
+    if (button) {
+      button.disabled = false;
+      button.textContent =
+        "Submit Worker Profile";
+    }
+
   }
 }
 
@@ -2281,6 +3082,20 @@ async function registerWorker(event) {
 // ============================================================
 
 function updateWorkerLocation() {
+  if (!state.user) {
+    showAuth();
+    return;
+  }
+
+  if (state.user.role !== "worker") {
+    showMessage(
+      "Only worker accounts can update worker GPS.",
+      "error"
+    );
+
+    return;
+  }
+
   if (!navigator.geolocation) {
     showMessage(
       "GPS is not supported by this browser.",
@@ -2310,6 +3125,7 @@ function updateWorkerLocation() {
           "/workers/location",
           {
             method: "POST",
+
             body: JSON.stringify({
               lat,
               lng
@@ -2318,7 +3134,7 @@ function updateWorkerLocation() {
         );
 
         showMessage(
-          "Worker GPS location updated.",
+          "Worker GPS location updated successfully.",
           "success"
         );
 
@@ -2330,7 +3146,9 @@ function updateWorkerLocation() {
         );
 
       }
+
     },
+
     error => {
 
       if (
@@ -2349,7 +3167,9 @@ function updateWorkerLocation() {
         "Unable to update your location.",
         "error"
       );
+
     },
+
     {
       enableHighAccuracy: true,
       timeout: 15000,
@@ -2360,11 +3180,59 @@ function updateWorkerLocation() {
 
 
 // ============================================================
+// WORKER AVAILABILITY
+// ============================================================
+
+async function setWorkerAvailability(
+  available
+) {
+  try {
+
+    const data =
+      await apiRequest(
+        "/workers/availability",
+        {
+          method: "POST",
+
+          body: JSON.stringify({
+            available:
+              Boolean(available)
+          })
+        }
+      );
+
+    showMessage(
+      data.available
+        ? "You are now available for jobs."
+        : "You are now unavailable for new jobs.",
+      "success"
+    );
+
+    renderWorkerHome();
+
+  } catch (error) {
+
+    showMessage(
+      error.message,
+      "error"
+    );
+
+  }
+}
+
+
+// ============================================================
 // WORKER BOOKINGS
 // ============================================================
 
 async function loadWorkerBookings() {
+  if (!state.user) {
+    showAuth();
+    return;
+  }
+
   try {
+
     const data =
       await apiRequest(
         "/bookings/my"
@@ -2378,16 +3246,18 @@ async function loadWorkerBookings() {
     renderWorkerBookings();
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
   }
 }
 
 
 // ============================================================
-// RENDER WORKER BOOKINGS
+// WORKER BOOKINGS UI
 // ============================================================
 
 function renderWorkerBookings() {
@@ -2435,55 +3305,86 @@ function renderWorkerBookings() {
 
       ${state.currentBookings
         .map(booking => `
-          <article class="booking-card">
+
+          <article
+            class="booking-card"
+          >
 
             <h3>
-              ${escapeHTML(booking.category)}
+              ${escapeHTML(
+                booking.category
+              )}
             </h3>
 
             <p>
-              Booking #${escapeHTML(booking.id)}
+              Booking #
+              ${escapeHTML(booking.id)}
             </p>
 
             <p>
               Status:
               <strong>
-                ${escapeHTML(booking.status)}
+                ${escapeHTML(
+                  statusLabel(
+                    booking.status
+                  )
+                )}
               </strong>
             </p>
 
             <p>
               Work:
-              ${escapeHTML(booking.description)}
+              ${escapeHTML(
+                booking.description
+              )}
             </p>
 
             <p>
               Address:
-              ${escapeHTML(booking.address)}
+              ${escapeHTML(
+                booking.address
+              )}
+            </p>
+
+            <p>
+              Duration:
+              ${escapeHTML(
+                booking.duration
+              )}
             </p>
 
             <p>
               Worker price:
               <strong>
-                ${money(booking.worker_price)}
+                ${money(
+                  booking.worker_price
+                )}
               </strong>
             </p>
 
             <p>
               Platform fee:
-              ${money(booking.platform_fee)}
+              ${money(
+                booking.platform_fee
+              )}
             </p>
 
             <p>
               Customer total:
-              ${money(booking.customer_total)}
+              ${money(
+                booking.customer_total
+              )}
             </p>
 
             <p>
               Payment:
-              ${escapeHTML(booking.payment_method)}
+              ${escapeHTML(
+                booking.payment_method
+              )}
               /
-              ${escapeHTML(booking.payment_status)}
+              ${escapeHTML(
+                booking.payment_status
+              )}
             </p>
 
             ${
@@ -2491,18 +3392,28 @@ function renderWorkerBookings() {
                 ? `
                   <p>
                     📞 Customer:
+
                     ${
                       booking.customer_phone ===
                       "Hidden until accepted"
-                        ? "Hidden until accepted"
+                        ? `
+                          <span>
+                            Hidden until accepted
+                          </span>
+                        `
                         : `
                           <a
-                            href="tel:${escapeHTML(booking.customer_phone)}"
+                            href="tel:${escapeHTML(
+                              booking.customer_phone
+                            )}"
                           >
-                            ${escapeHTML(booking.customer_phone)}
+                            ${escapeHTML(
+                              booking.customer_phone
+                            )}
                           </a>
                         `
                     }
+
                   </p>
                 `
                 : ""
@@ -2511,6 +3422,7 @@ function renderWorkerBookings() {
             ${workerBookingActions(booking)}
 
           </article>
+
         `)
         .join("")}
 
@@ -2523,22 +3435,31 @@ function renderWorkerBookings() {
 // WORKER BOOKING ACTIONS
 // ============================================================
 
-function workerBookingActions(
-  booking
-) {
+function workerBookingActions(booking) {
+
   if (
     booking.status ===
     "requested"
   ) {
     return `
       <button
+        type="button"
         class="primary-btn"
         onclick="acceptBooking(${Number(booking.id)})"
       >
         Accept Booking
       </button>
+
+      <button
+        type="button"
+        class="secondary-btn"
+        onclick="cancelBooking(${Number(booking.id)})"
+      >
+        Decline / Cancel
+      </button>
     `;
   }
+
 
   if (
     booking.status ===
@@ -2546,13 +3467,23 @@ function workerBookingActions(
   ) {
     return `
       <button
+        type="button"
         class="primary-btn"
         onclick="startBooking(${Number(booking.id)})"
       >
         Start Job
       </button>
+
+      <button
+        type="button"
+        class="secondary-btn"
+        onclick="cancelBooking(${Number(booking.id)})"
+      >
+        Cancel Booking
+      </button>
     `;
   }
+
 
   if (
     booking.status ===
@@ -2561,7 +3492,9 @@ function workerBookingActions(
     return `
       <div class="completion-box">
 
-        <label>
+        <label
+          for="completion-${Number(booking.id)}"
+        >
           Enter customer's completion code
         </label>
 
@@ -2570,10 +3503,13 @@ function workerBookingActions(
           type="text"
           inputmode="numeric"
           maxlength="6"
+          minlength="6"
+          pattern="[0-9]{6}"
           placeholder="6 digit code"
         >
 
         <button
+          type="button"
           class="primary-btn"
           onclick="completeBooking(${Number(booking.id)})"
         >
@@ -2583,6 +3519,7 @@ function workerBookingActions(
       </div>
     `;
   }
+
 
   if (
     booking.status ===
@@ -2594,6 +3531,19 @@ function workerBookingActions(
       </div>
     `;
   }
+
+
+  if (
+    booking.status ===
+    "cancelled"
+  ) {
+    return `
+      <div class="booking-warning">
+        Booking cancelled.
+      </div>
+    `;
+  }
+
 
   return "";
 }
@@ -2607,16 +3557,23 @@ async function acceptBooking(
   bookingId
 ) {
   try {
-    const data =
-      await apiRequest(
-        `/bookings/${Number(bookingId)}/accept`,
-        {
-          method: "POST"
-        }
-      );
 
-    showPhoneDialog(
-      data.workerPhone
+    /*
+     * IMPORTANT:
+     * The current server returns workerPhone here.
+     * That is the WORKER'S OWN number.
+     *
+     * Therefore we deliberately DO NOT show it in a popup.
+     *
+     * After acceptance, /bookings/my returns the customer's
+     * phone number because the booking is no longer "requested".
+     */
+
+    await apiRequest(
+      `/bookings/${Number(bookingId)}/accept`,
+      {
+        method: "POST"
+      }
     );
 
     showMessage(
@@ -2627,10 +3584,12 @@ async function acceptBooking(
     await loadWorkerBookings();
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
   }
 }
 
@@ -2643,6 +3602,7 @@ async function startBooking(
   bookingId
 ) {
   try {
+
     await apiRequest(
       `/bookings/${Number(bookingId)}/start`,
       {
@@ -2658,10 +3618,12 @@ async function startBooking(
     await loadWorkerBookings();
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
   }
 }
 
@@ -2680,8 +3642,7 @@ async function completeBooking(
 
   const code =
     String(input?.value || "")
-      .replace(/\D/g, "")
-      .slice(0, 6);
+      .replace(/\D/g, "");
 
   if (!/^[0-9]{6}$/.test(code)) {
     showMessage(
@@ -2693,11 +3654,13 @@ async function completeBooking(
   }
 
   try {
+
     const data =
       await apiRequest(
         `/bookings/${Number(bookingId)}/complete`,
         {
           method: "POST",
+
           body: JSON.stringify({
             code
           })
@@ -2713,10 +3676,93 @@ async function completeBooking(
     await loadWorkerBookings();
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
+  }
+}
+
+
+// ============================================================
+// WORKER CANCEL
+// ============================================================
+
+async function cancelWorkerBooking(
+  bookingId
+) {
+  await cancelBooking(
+    bookingId,
+    "Cancelled by worker"
+  );
+}
+
+
+// ============================================================
+// GENERIC CANCEL
+// ============================================================
+
+async function cancelBooking(
+  bookingId,
+  defaultReason = ""
+) {
+  const confirmed =
+    window.confirm(
+      "Are you sure you want to cancel this booking?"
+    );
+
+  if (!confirmed) {
+    return;
+  }
+
+  let reason = defaultReason;
+
+  if (!reason) {
+    reason =
+      window.prompt(
+        "Cancellation reason (optional):",
+        ""
+      ) || "";
+  }
+
+  try {
+
+    await apiRequest(
+      `/bookings/${Number(bookingId)}/cancel`,
+      {
+        method: "POST",
+
+        body: JSON.stringify({
+          reason:
+            String(reason).trim() ||
+            "Cancelled by user"
+        })
+      }
+    );
+
+    showMessage(
+      "Booking cancelled successfully.",
+      "success"
+    );
+
+    if (
+      state.user?.role ===
+      "worker"
+    ) {
+      await loadWorkerBookings();
+    } else {
+      await loadMyBookings();
+    }
+
+  } catch (error) {
+
+    showMessage(
+      error.message,
+      "error"
+    );
+
   }
 }
 
@@ -2727,6 +3773,7 @@ async function completeBooking(
 
 async function loadWorkerNotifications() {
   try {
+
     const data =
       await apiRequest(
         "/notifications"
@@ -2740,17 +3787,15 @@ async function loadWorkerNotifications() {
     renderWorkerNotifications();
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
   }
 }
 
-
-// ============================================================
-// RENDER WORKER NOTIFICATIONS
-// ============================================================
 
 function renderWorkerNotifications() {
   const content =
@@ -2793,34 +3838,53 @@ function renderWorkerNotifications() {
 
       ${state.notifications
         .map(notification => `
-          <article class="notification-card">
+
+          <article
+            class="notification-card"
+          >
 
             <strong>
-              ${escapeHTML(notification.type)}
+              ${escapeHTML(
+                notification.type
+              )}
             </strong>
 
             <p>
-              ${escapeHTML(notification.message)}
+              ${escapeHTML(
+                notification.message
+              )}
             </p>
 
             <small>
-              ${escapeHTML(notification.created_at)}
+              ${escapeHTML(
+                formatDate(
+                  notification.created_at
+                )
+              )}
             </small>
 
             ${
-              !notification.read
+              !Number(
+                notification.read
+              )
                 ? `
                   <button
+                    type="button"
                     class="secondary-btn"
                     onclick="markWorkerNotificationRead(${Number(notification.id)})"
                   >
                     Mark as read
                   </button>
                 `
-                : ""
+                : `
+                  <small>
+                    ✓ Read
+                  </small>
+                `
             }
 
           </article>
+
         `)
         .join("")}
 
@@ -2829,14 +3893,11 @@ function renderWorkerNotifications() {
 }
 
 
-// ============================================================
-// MARK WORKER NOTIFICATION READ
-// ============================================================
-
 async function markWorkerNotificationRead(
   notificationId
 ) {
   try {
+
     await apiRequest(
       `/notifications/${Number(notificationId)}/read`,
       {
@@ -2847,11 +3908,167 @@ async function markWorkerNotificationRead(
     await loadWorkerNotifications();
 
   } catch (error) {
+
     showMessage(
       error.message,
       "error"
     );
+
   }
+}
+
+
+// ============================================================
+// WORKER WALLET
+// ============================================================
+
+async function loadWorkerWallet() {
+  try {
+
+    const data =
+      await apiRequest(
+        "/workers/wallet"
+      );
+
+    renderWorkerWallet(
+      data
+    );
+
+  } catch (error) {
+
+    showMessage(
+      error.message,
+      "error"
+    );
+
+  }
+}
+
+
+function renderWorkerWallet(
+  data
+) {
+  const content =
+    document.getElementById(
+      "worker-content"
+    );
+
+  if (!content) {
+    return;
+  }
+
+  const transactions =
+    Array.isArray(
+      data.transactions
+    )
+      ? data.transactions
+      : [];
+
+  content.innerHTML = `
+    <div class="booking-card">
+
+      <div class="section-heading">
+
+        <span class="eyebrow">
+          WORKER WALLET
+        </span>
+
+        <h3>
+          Wallet balance
+        </h3>
+
+      </div>
+
+      <div class="price-summary">
+
+        <p>
+          Current balance:
+          <strong>
+            ${money(data.balance)}
+          </strong>
+        </p>
+
+        <p>
+          Cash booking requirement:
+          <strong>
+            ${escapeHTML(
+              data.requiredForNextCashBooking
+            )}
+          </strong>
+        </p>
+
+      </div>
+
+      <h3>
+        Recent wallet transactions
+      </h3>
+
+      ${
+        transactions.length
+          ? `
+            <div class="booking-list">
+
+              ${transactions
+                .map(tx => `
+                  <article
+                    class="notification-card"
+                  >
+
+                    <strong>
+                      ${escapeHTML(
+                        tx.type
+                      )}
+                    </strong>
+
+                    <p>
+                      Amount:
+                      ${money(tx.amount)}
+                    </p>
+
+                    <p>
+                      Status:
+                      ${escapeHTML(
+                        tx.status
+                      )}
+                    </p>
+
+                    ${
+                      tx.description
+                        ? `
+                          <p>
+                            ${escapeHTML(
+                              tx.description
+                            )}
+                          </p>
+                        `
+                        : ""
+                    }
+
+                    <small>
+                      ${escapeHTML(
+                        formatDate(
+                          tx.created_at
+                        )
+                      )}
+                    </small>
+
+                  </article>
+                `)
+                .join("")}
+
+            </div>
+          `
+          : `
+            <div class="empty-state">
+              <p>
+                No wallet transactions yet.
+              </p>
+            </div>
+          `
+      }
+
+    </div>
+  `;
 }
 
 
@@ -2870,6 +4087,7 @@ document.addEventListener(
     if (state.user) {
       renderApp();
     }
+
   }
 );
 
@@ -2917,6 +4135,9 @@ window.loadMyBookings =
 window.getWorkerContact =
   getWorkerContact;
 
+window.closePhoneDialog =
+  closePhoneDialog;
+
 window.loadNotifications =
   loadNotifications;
 
@@ -2944,6 +4165,9 @@ window.registerWorker =
 window.updateWorkerLocation =
   updateWorkerLocation;
 
+window.setWorkerAvailability =
+  setWorkerAvailability;
+
 window.loadWorkerBookings =
   loadWorkerBookings;
 
@@ -2956,8 +4180,17 @@ window.startBooking =
 window.completeBooking =
   completeBooking;
 
+window.cancelBooking =
+  cancelBooking;
+
+window.cancelWorkerBooking =
+  cancelWorkerBooking;
+
 window.loadWorkerNotifications =
   loadWorkerNotifications;
 
 window.markWorkerNotificationRead =
   markWorkerNotificationRead;
+
+window.loadWorkerWallet =
+  loadWorkerWallet;
