@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
 
@@ -10,166 +9,79 @@
   >
 
   <meta
-    name="description"
-    content="KaamSetu - Find trusted local service professionals near you."
-  >
-
-  <meta
     name="theme-color"
-    content="#111827"
+    content="#1769e0"
   >
 
-  <title>KaamSetu - Local Worker Marketplace</title>
+  <title>KaamSetu</title>
 
   <link rel="stylesheet" href="/style.css">
 </head>
 
 <body>
 
-  <!-- ======================================================
-       TOP BAR
-  ======================================================= -->
+  <!-- =====================================================
+       HEADER
+  ====================================================== -->
 
-  <header class="topbar">
+  <header class="site-header">
 
-    <div class="brand">
-      <span class="brand-main">Kaam</span>
-      <span class="brand-accent">Setu</span>
-    </div>
+    <div class="container header-inner">
 
-    <div id="session">
-      <button
-        type="button"
-        class="secondary-btn"
-        onclick="showAuth()"
+      <a
+        href="/"
+        class="brand"
+        aria-label="KaamSetu Home"
       >
-        Login
-      </button>
+        Kaam<span>Setu</span>
+      </a>
+
+      <div
+        id="session"
+        class="session"
+      >
+        <!-- app.js puts Login / Logout here -->
+      </div>
+
     </div>
 
   </header>
 
 
-  <!-- ======================================================
-       MAIN
-  ======================================================= -->
+  <!-- =====================================================
+       HERO
+  ====================================================== -->
 
-  <main class="container">
+  <main>
 
+    <section class="hero-section">
 
-    <!-- ====================================================
-         HERO
-    ===================================================== -->
+      <div class="container">
 
-    <section class="hero">
+        <div class="hero-content">
 
-      <div class="hero-content">
+          <span class="eyebrow">
+            TRUSTED LOCAL SERVICES
+          </span>
 
-        <span class="eyebrow">
-          TRUSTED LOCAL WORKER MARKETPLACE
-        </span>
+          <h1>
+            Find the right worker
+            <br>
+            for the job.
+          </h1>
 
-        <h1>
-          Find the right worker,
-          <span>near you.</span>
-        </h1>
-
-        <p>
-          Find plumbers, electricians, carpenters,
-          painters, cleaners, mechanics and other
-          local service professionals.
-        </p>
-
-        <div class="hero-actions">
+          <p>
+            Connect with trusted local professionals
+            for everyday services at your doorstep.
+          </p>
 
           <button
             type="button"
             class="primary-btn"
             onclick="showAuth()"
           >
-            Get Started
+            Login / Get Started
           </button>
-
-          <button
-            type="button"
-            class="secondary-btn"
-            onclick="locate()"
-          >
-            📍 Find Nearby Workers
-          </button>
-
-        </div>
-
-      </div>
-
-
-      <div class="hero-card">
-
-        <div class="hero-icon">
-          🛠️
-        </div>
-
-        <h3>
-          Local help. Simple booking.
-        </h3>
-
-
-        <div class="feature">
-
-          <span>📍</span>
-
-          <div>
-            <b>GPS Nearby Search</b>
-
-            <small>
-              Find approved workers near your location.
-            </small>
-          </div>
-
-        </div>
-
-
-        <div class="feature">
-
-          <span>✓</span>
-
-          <div>
-            <b>Verified Professionals</b>
-
-            <small>
-              Workers are approved before appearing.
-            </small>
-          </div>
-
-        </div>
-
-
-        <div class="feature">
-
-          <span>📞</span>
-
-          <div>
-            <b>Direct Worker Contact</b>
-
-            <small>
-              Contact becomes available after acceptance.
-            </small>
-          </div>
-
-        </div>
-
-
-        <div class="feature">
-
-          <span>🔐</span>
-
-          <div>
-            <b>Secure Job Completion</b>
-
-            <small>
-              Jobs use a customer completion code.
-            </small>
-          </div>
 
         </div>
 
@@ -178,314 +90,144 @@
     </section>
 
 
-    <!-- ====================================================
+    <!-- =================================================
          APP AREA
          IMPORTANT:
-         app.js controls this area after login.
-    ===================================================== -->
+         app.js dynamically renders login,
+         role selection, customer dashboard
+         and worker dashboard inside this element.
+    ================================================== -->
 
-    <section id="app"></section>
+    <section class="app-section">
+
+      <div class="container">
+
+        <div
+          id="app"
+          class="app-container"
+        >
+          <!-- app.js renders everything here -->
+        </div>
+
+      </div>
+
+    </section>
 
 
-    <!-- ====================================================
+    <!-- =================================================
          SERVICES
-    ===================================================== -->
+    ================================================== -->
 
     <section class="services-section">
 
-      <div class="section-heading">
+      <div class="container">
 
-        <span class="eyebrow">
-          POPULAR SERVICES
-        </span>
+        <div class="section-heading">
 
-        <h2>
-          What do you need help with?
-        </h2>
+          <span class="eyebrow">
+            OUR SERVICES
+          </span>
 
-        <p>
-          Choose a service to find professionals
-          near you.
-        </p>
-
-      </div>
-
-
-      <div class="service-grid">
-
-
-        <button
-          type="button"
-          class="service-card"
-          onclick="selectService('Plumber')"
-        >
-
-          <span>🔧</span>
-
-          <b>
-            Plumber
-          </b>
-
-          <small>
-            Pipe & water work
-          </small>
-
-        </button>
-
-
-        <button
-          type="button"
-          class="service-card"
-          onclick="selectService('Electrician')"
-        >
-
-          <span>⚡</span>
-
-          <b>
-            Electrician
-          </b>
-
-          <small>
-            Electrical repairs
-          </small>
-
-        </button>
-
-
-        <button
-          type="button"
-          class="service-card"
-          onclick="selectService('Carpenter')"
-        >
-
-          <span>🪚</span>
-
-          <b>
-            Carpenter
-          </b>
-
-          <small>
-            Furniture & wood work
-          </small>
-
-        </button>
-
-
-        <button
-          type="button"
-          class="service-card"
-          onclick="selectService('Painter')"
-        >
-
-          <span>🎨</span>
-
-          <b>
-            Painter
-          </b>
-
-          <small>
-            Home & wall painting
-          </small>
-
-        </button>
-
-
-        <button
-          type="button"
-          class="service-card"
-          onclick="selectService('Cleaner')"
-        >
-
-          <span>🧹</span>
-
-          <b>
-            Cleaner
-          </b>
-
-          <small>
-            Home & office cleaning
-          </small>
-
-        </button>
-
-
-        <button
-          type="button"
-          class="service-card"
-          onclick="selectService('AC Technician')"
-        >
-
-          <span>❄️</span>
-
-          <b>
-            AC Technician
-          </b>
-
-          <small>
-            AC service & repair
-          </small>
-
-        </button>
-
-
-        <button
-          type="button"
-          class="service-card"
-          onclick="selectService('Mechanic')"
-        >
-
-          <span>🔩</span>
-
-          <b>
-            Mechanic
-          </b>
-
-          <small>
-            Vehicle repairs
-          </small>
-
-        </button>
-
-
-        <button
-          type="button"
-          class="service-card"
-          onclick="selectService('General Labour')"
-        >
-
-          <span>👷</span>
-
-          <b>
-            General Labour
-          </b>
-
-          <small>
-            Daily & small jobs
-          </small>
-
-        </button>
-
-      </div>
-
-    </section>
-
-
-    <!-- ====================================================
-         HOW IT WORKS
-    ===================================================== -->
-
-    <section class="how-section">
-
-      <div class="section-heading">
-
-        <span class="eyebrow">
-          HOW IT WORKS
-        </span>
-
-        <h2>
-          Simple and secure service booking
-        </h2>
-
-      </div>
-
-
-      <div class="steps">
-
-
-        <div class="step">
-
-          <div class="step-number">
-            01
-          </div>
-
-          <h3>
-            Choose a service
-          </h3>
+          <h2>
+            Services you can find on KaamSetu
+          </h2>
 
           <p>
-            Select the professional you need.
+            Get help from local professionals
+            for your everyday work.
           </p>
 
         </div>
 
 
-        <div class="step">
+        <div class="service-grid">
 
-          <div class="step-number">
-            02
+          <div class="service-card">
+            <span>🔧</span>
+            <b>Plumber</b>
+            <small>Water & plumbing work</small>
           </div>
 
-          <h3>
-            Find nearby workers
-          </h3>
-
-          <p>
-            KaamSetu searches approved workers
-            near your location.
-          </p>
-
-        </div>
-
-
-        <div class="step">
-
-          <div class="step-number">
-            03
+          <div class="service-card">
+            <span>⚡</span>
+            <b>Electrician</b>
+            <small>Electrical services</small>
           </div>
 
-          <h3>
-            Book securely
-          </h3>
+          <div class="service-card">
+            <span>🪚</span>
+            <b>Carpenter</b>
+            <small>Furniture & wood work</small>
+          </div>
 
-          <p>
-            Send a booking request and complete
-            the job securely.
-          </p>
+          <div class="service-card">
+            <span>🎨</span>
+            <b>Painter</b>
+            <small>Painting services</small>
+          </div>
+
+          <div class="service-card">
+            <span>🧹</span>
+            <b>Cleaner</b>
+            <small>Home cleaning services</small>
+          </div>
+
+          <div class="service-card">
+            <span>❄️</span>
+            <b>AC Technician</b>
+            <small>AC service & repair</small>
+          </div>
+
+          <div class="service-card">
+            <span>🔩</span>
+            <b>Mechanic</b>
+            <small>Vehicle repair services</small>
+          </div>
+
+          <div class="service-card">
+            <span>👷</span>
+            <b>General Labour</b>
+            <small>General work assistance</small>
+          </div>
 
         </div>
 
       </div>
 
     </section>
-
-
-    <!-- ====================================================
-         FOOTER
-    ===================================================== -->
-
-    <footer>
-
-      <div>
-
-        <b>
-          Kaam<span>Setu</span>
-        </b>
-
-        <p>
-          Connecting customers with local
-          service professionals.
-        </p>
-
-      </div>
-
-
-      <div class="footer-links">
-
-        <a href="/">
-          Home
-        </a>
-
-      </div>
-
-    </footer>
 
   </main>
 
 
-  <!-- ======================================================
-       CURRENT FRONTEND APP
-       DO NOT ADD INLINE APP JAVASCRIPT HERE.
-  ======================================================= -->
+  <!-- =====================================================
+       FOOTER
+  ====================================================== -->
+
+  <footer class="site-footer">
+
+    <div class="container">
+
+      <div class="footer-brand">
+        Kaam<span>Setu</span>
+      </div>
+
+      <p>
+        Connecting customers with local service professionals.
+      </p>
+
+      <small>
+        © 2026 KaamSetu. All rights reserved.
+      </small>
+
+    </div>
+
+  </footer>
+
+
+  <!-- =====================================================
+       APP JS
+       MUST BE LOADED AFTER #app AND #session EXIST
+  ====================================================== -->
 
   <script
     src="/app.js"
@@ -493,5 +235,4 @@
   ></script>
 
 </body>
-
 </html>
