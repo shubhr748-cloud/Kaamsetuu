@@ -23,62 +23,71 @@ const categories = [
   "CCTV Technician"
 ];
 
+
+// =========================
+// API HELPER
+// =========================
+
 async function api(url, options = {}) {
+
   options.headers = {
     ...(options.headers || {}),
     ...(user ? { "x-user-id": user.id } : {})
   };
 
   const response = await fetch(url, options);
-  const data = await response.json();
+
+  let data = {};
+
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
 
   if (!response.ok) {
-    throw new Error(data.error || "Something went wrong");
+    throw new Error(
+      data.error || "Something went wrong"
+    );
   }
 
   return data;
 }
 
 
-/* =========================
-   AUTH
-========================= */
+// =========================
+// AUTH SCREEN
+// =========================
 
 function showAuth() {
 
   document.getElementById("app").innerHTML = `
+
     <section class="panel auth-panel">
 
       <div class="section-heading">
-        <span class="eyebrow">GET STARTED</span>
+
+        <span class="eyebrow">
+          GET STARTED
+        </span>
 
         <h2>
-          Register or Login
+          Login to KaamSetu
         </h2>
 
         <p>
           Enter your mobile number to continue.
         </p>
+
       </div>
 
       <input
         id="phone"
         type="tel"
-        placeholder="Mobile number"
-        maxlength="15"
+        inputmode="numeric"
+        maxlength="10"
+        placeholder="10 digit mobile number"
       >
-
-      <select id="role">
-
-        <option value="customer">
-          Customer
-        </option>
-
-        <option value="worker">
-          Worker / Service Professional
-        </option>
-
-      </select>
 
       <button
         class="primary-btn full-btn"
@@ -90,27 +99,33 @@ function showAuth() {
       <div id="otpbox"></div>
 
     </section>
+
   `;
 }
 
+
+// =========================
+// SEND OTP
+// =========================
 
 async function sendOTP() {
 
   const phone =
     document.getElementById("phone").value.trim();
 
-  const role =
-    document.getElementById("role").value;
+  if (!/^[0-9]{10}$/.test(phone)) {
 
-  if (!phone) {
-    alert("Please enter your mobile number.");
+    alert(
+      "Please enter a valid 10 digit mobile number."
+    );
+
     return;
   }
 
   try {
 
     const data = await api(
-      "/api/auth/request-otp",
+      "/api/auth/send-otp",
       {
         method: "POST",
 
@@ -129,30 +144,30 @@ async function sendOTP() {
       <div class="otp-box">
 
         <p>
-          OTP sent to your mobile number.
+          ${escapeHTML(
+            data.message ||
+            "OTP sent successfully."
+          )}
         </p>
-
-        ${
-          data.demoCode
-            ? `<p class="demo-otp">
-                Demo OTP:
-                <strong>${data.demoCode}</strong>
-              </p>`
-            : ""
-        }
 
         <input
           id="otp"
           type="number"
+          inputmode="numeric"
+          maxlength="6"
           placeholder="Enter OTP"
         >
 
         <button
           class="primary-btn full-btn"
-          onclick="verifyOTP('${phone}','${role}')"
+          onclick="verifyOTP('${phone}')"
         >
           Verify OTP
         </button>
+
+        <p style="margin-top:12px;font-size:13px;color:#687386;">
+          Enter the OTP received on your mobile.
+        </p>
 
       </div>
 
@@ -166,13 +181,19 @@ async function sendOTP() {
 }
 
 
-async function verifyOTP(phone, role) {
+// =========================
+// VERIFY OTP
+// =========================
+
+async function verifyOTP(phone) {
 
   const code =
     document.getElementById("otp").value.trim();
 
-  if (!code) {
-    alert("Enter OTP.");
+  if (!/^[0-9]{6}$/.test(code)) {
+
+    alert("Please enter the 6 digit OTP.");
+
     return;
   }
 
@@ -189,8 +210,7 @@ async function verifyOTP(phone, role) {
 
         body: JSON.stringify({
           phone,
-          code,
-          role
+          otp: code
         })
       }
     );
@@ -212,9 +232,93 @@ async function verifyOTP(phone, role) {
 }
 
 
-/* =========================
-   GPS
-========================= */
+// =========================
+// ROLE SELECTION
+// =========================
+
+function showRoleSelection() {
+
+  document.getElementById("app").innerHTML = `
+
+    <section class="panel">
+
+      <div class="section-heading">
+
+        <span class="eyebrow">
+          WELCOME TO KAAMSETU
+        </span>
+
+        <h2>
+          How do you want to use KaamSetu?
+        </h2>
+
+        <p>
+          Choose your account type.
+        </p>
+
+      </div>
+
+      <button
+        class="primary-btn full-btn"
+        onclick="selectRole('customer')"
+      >
+        👤 I need a service
+      </button>
+
+      <br><br>
+
+      <button
+        class="secondary-btn full-btn"
+        onclick="selectRole('worker')"
+      >
+        🛠️ I provide services
+      </button>
+
+    </section>
+
+  `;
+}
+
+
+async function selectRole(role) {
+
+  try {
+
+    const data = await api(
+      "/api/auth/select-role",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json"
+        },
+
+        body: JSON.stringify({
+          role
+        })
+      }
+    );
+
+    user.role = data.role;
+
+    localStorage.setItem(
+      "ks_user",
+      JSON.stringify(user)
+    );
+
+    render();
+
+  } catch (error) {
+
+    alert(error.message);
+
+  }
+}
+
+
+// =========================
+// GPS
+// =========================
 
 function locate() {
 
@@ -241,7 +345,10 @@ function locate() {
         "Your location has been detected."
       );
 
-      if (user && user.role === "customer") {
+      if (
+        user &&
+        user.role === "customer"
+      ) {
         findWorkers();
       }
 
@@ -250,7 +357,7 @@ function locate() {
     () => {
 
       alert(
-        "Location permission was denied. You can still search without GPS."
+        "Location permission was denied."
       );
 
     },
@@ -265,58 +372,62 @@ function locate() {
 }
 
 
-/* =========================
-   SERVICES
-========================= */
-
-function selectService(service) {
-
-  category = service;
-
-  if (!user) {
-
-    showAuth();
-
-    return;
-  }
-
-  if (user.role !== "customer") {
-
-    alert(
-      "Please login as a customer to book workers."
-    );
-
-    return;
-  }
-
-  render();
-
-  document
-    .getElementById("worker-section")
-    ?.scrollIntoView({
-      behavior: "smooth"
-    });
-
-}
-
-
-/* =========================
-   FIND WORKERS
-========================= */
+// =========================
+// FIND WORKERS
+// =========================
 
 async function findWorkers() {
 
-  const workerContainer =
+  const container =
     document.getElementById("workers");
 
-  if (!workerContainer) {
+  if (!container) {
     return;
   }
 
-  workerContainer.innerHTML = `
+  if (
+    latitude === null ||
+    longitude === null
+  ) {
+
+    container.innerHTML = `
+
+      <div class="empty-state">
+
+        <div class="empty-icon">
+          📍
+        </div>
+
+        <h3>
+          Turn on your location
+        </h3>
+
+        <p>
+          Use GPS to find nearby available workers.
+        </p>
+
+        <br>
+
+        <button
+          class="primary-btn"
+          onclick="locate()"
+        >
+          Use GPS
+        </button>
+
+      </div>
+
+    `;
+
+    return;
+  }
+
+  container.innerHTML = `
+
     <div class="loading">
-      Finding available workers...
+      Finding nearby workers...
     </div>
+
   `;
 
   try {
@@ -330,36 +441,32 @@ async function findWorkers() {
     );
 
     params.set(
+      "lat",
+      latitude
+    );
+
+    params.set(
+      "lng",
+      longitude
+    );
+
+    params.set(
       "radius",
       "10"
     );
 
-    if (
-      latitude !== null &&
-      longitude !== null
-    ) {
-
-      params.set(
-        "lat",
-        latitude
-      );
-
-      params.set(
-        "lng",
-        longitude
-      );
-
-    }
-
-    const workers =
+    const data =
       await api(
         "/api/workers/nearby?" +
         params.toString()
       );
 
+    const workers =
+      data.workers || [];
+
     if (!workers.length) {
 
-      workerContainer.innerHTML = `
+      container.innerHTML = `
 
         <div class="empty-state">
 
@@ -372,9 +479,9 @@ async function findWorkers() {
           </h3>
 
           <p>
-            There are currently no approved
-            ${category.toLowerCase()}
-            workers available nearby.
+            No approved ${escapeHTML(
+              category.toLowerCase()
+            )} workers are available nearby right now.
           </p>
 
         </div>
@@ -384,8 +491,7 @@ async function findWorkers() {
       return;
     }
 
-
-    workerContainer.innerHTML =
+    container.innerHTML =
       workers.map(worker => `
 
         <article class="worker-card">
@@ -424,15 +530,24 @@ async function findWorkers() {
               </span>
 
               <span>
-                ${
-                  worker.distance_km == null
-                    ? "Distance unavailable"
-                    : worker.distance_km.toFixed(1) +
-                      " km away"
+                ${worker.distanceKm == null
+                  ? "Distance unavailable"
+                  : worker.distanceKm + " km away"
                 }
               </span>
 
             </div>
+
+            ${
+              worker.skills
+                ? `
+                  <p class="worker-bio">
+                    Skills:
+                    ${escapeHTML(worker.skills)}
+                  </p>
+                `
+                : ""
+            }
 
             ${
               worker.bio
@@ -465,7 +580,7 @@ async function findWorkers() {
               onclick="bookWorker(
                 ${worker.id},
                 '${escapeAttribute(worker.category)}',
-                ${worker.rate || 0}
+                ${Number(worker.rate) || 0}
               )"
             >
               Request
@@ -479,19 +594,21 @@ async function findWorkers() {
 
   } catch (error) {
 
-    workerContainer.innerHTML = `
+    container.innerHTML = `
+
       <div class="error-state">
         ${escapeHTML(error.message)}
       </div>
+
     `;
 
   }
 }
 
 
-/* =========================
-   BOOKING
-========================= */
+// =========================
+// BOOK WORKER
+// =========================
 
 async function bookWorker(
   workerId,
@@ -519,8 +636,8 @@ async function bookWorker(
 
   const duration =
     prompt(
-      "Work type: enter 'small' or 'full-day'",
-      "small"
+      "Enter work type: small-work or full-day",
+      "small-work"
     );
 
   if (duration === null) {
@@ -529,7 +646,7 @@ async function bookWorker(
 
   try {
 
-    await api(
+    const data = await api(
       "/api/bookings",
       {
         method: "POST",
@@ -540,7 +657,7 @@ async function bookWorker(
 
         body: JSON.stringify({
 
-          worker_id: workerId,
+          workerId,
 
           category:
             workerCategory,
@@ -555,10 +672,9 @@ async function bookWorker(
 
           duration,
 
-          estimated_price: rate
+          estimatedPrice: rate
 
         })
-
       }
     );
 
@@ -576,9 +692,9 @@ async function bookWorker(
 }
 
 
-/* =========================
-   BOOKINGS
-========================= */
+// =========================
+// BOOKINGS
+// =========================
 
 async function loadBookings() {
 
@@ -591,22 +707,36 @@ async function loadBookings() {
 
   try {
 
+    const data =
+      await api("/api/bookings/my");
+
     const bookings =
-      await api("/api/bookings");
+      data.bookings || [];
 
     if (!bookings.length) {
 
       container.innerHTML = `
+
         <div class="empty-state">
-          <div class="empty-icon">📅</div>
-          <h3>No bookings yet</h3>
-          <p>Your job requests will appear here.</p>
+
+          <div class="empty-icon">
+            📅
+          </div>
+
+          <h3>
+            No bookings yet
+          </h3>
+
+          <p>
+            Your bookings will appear here.
+          </p>
+
         </div>
+
       `;
 
       return;
     }
-
 
     container.innerHTML =
       bookings.map(booking => `
@@ -625,21 +755,39 @@ async function loadBookings() {
               )}
             </h3>
 
-            <p>
-              Worker:
-              <strong>
-                ${escapeHTML(
-                  booking.worker_name ||
-                  "Worker"
-                )}
-              </strong>
-            </p>
+            ${
+              user.role === "customer"
+                ? `
+                  <p>
+                    Worker:
+                    <strong>
+                      ${escapeHTML(
+                        booking.worker_name ||
+                        "Worker"
+                      )}
+                    </strong>
+                  </p>
+                `
+                : `
+                  <p>
+                    Customer:
+                    <strong>
+                      ${escapeHTML(
+                        booking.customer_phone ||
+                        "Customer"
+                      )}
+                    </strong>
+                  </p>
+                `
+            }
 
           </div>
 
           <div class="booking-status">
 
-            <span class="status status-${booking.status}">
+            <span class="status status-${escapeAttribute(
+              booking.status
+            )}">
               ${formatStatus(
                 booking.status
               )}
@@ -654,18 +802,20 @@ async function loadBookings() {
   } catch (error) {
 
     container.innerHTML = `
+
       <div class="error-state">
         ${escapeHTML(error.message)}
       </div>
+
     `;
 
   }
 }
 
 
-/* =========================
-   WORKER ACCOUNT
-========================= */
+// =========================
+// WORKER DASHBOARD
+// =========================
 
 function workerDashboard() {
 
@@ -684,36 +834,33 @@ function workerDashboard() {
         </h2>
 
         <p>
-          Customers can discover you after
-          admin verification.
+          Your profile will be reviewed by KaamSetu
+          before customers can see you.
         </p>
 
       </div>
-
 
       <input
         id="workerName"
         placeholder="Full name"
       >
 
-
       <select id="workerCategory">
 
         ${categories.map(
-          item =>
-            `<option value="${item}">
-              ${item}
-            </option>`
+          item => `
+            <option value="${escapeHTML(item)}">
+              ${escapeHTML(item)}
+            </option>
+          `
         ).join("")}
 
       </select>
-
 
       <input
         id="workerSkills"
         placeholder="Skills e.g. pipe repair, wiring"
       >
-
 
       <input
         id="workerExperience"
@@ -722,7 +869,6 @@ function workerDashboard() {
         placeholder="Experience in years"
       >
 
-
       <input
         id="workerRate"
         type="number"
@@ -730,24 +876,23 @@ function workerDashboard() {
         placeholder="Starting rate ₹"
       >
 
-
       <textarea
         id="workerBio"
-        placeholder="Short description about your work"
         rows="4"
+        placeholder="Short description about your work"
       ></textarea>
 
-
       <button
-        class="primary-btn"
+        class="primary-btn full-btn"
         onclick="saveWorkerProfile()"
       >
-        Save Profile
+        Submit Profile
       </button>
 
+      <br>
 
       <button
-        class="secondary-btn"
+        class="secondary-btn full-btn"
         onclick="updateWorkerGPS()"
       >
         📍 Update GPS Location
@@ -779,9 +924,12 @@ function workerDashboard() {
   `;
 
   loadBookings();
-
 }
 
+
+// =========================
+// SAVE WORKER PROFILE
+// =========================
 
 async function saveWorkerProfile() {
 
@@ -815,7 +963,6 @@ async function saveWorkerProfile() {
       "workerBio"
     ).value.trim();
 
-
   if (!name) {
 
     alert(
@@ -825,46 +972,44 @@ async function saveWorkerProfile() {
     return;
   }
 
-
   try {
 
-    await api(
-      "/api/workers/profile",
-      {
-        method: "POST",
+    const data =
+      await api(
+        "/api/workers/register",
+        {
+          method: "POST",
 
-        headers: {
-          "Content-Type": "application/json"
-        },
+          headers: {
+            "Content-Type": "application/json"
+          },
 
-        body: JSON.stringify({
+          body: JSON.stringify({
 
-          name,
+            name,
 
-          category:
-            selectedCategory,
+            category:
+              selectedCategory,
 
-          skills,
+            skills,
 
-          experience,
+            experience,
 
-          rate,
+            rate,
 
-          bio,
+            bio,
 
-          lat: latitude,
+            lat: latitude,
 
-          lng: longitude,
+            lng: longitude
 
-          available: true
-
-        })
-
-      }
-    );
+          })
+        }
+      );
 
     alert(
-      "Profile saved. Admin approval is required before customers can see you."
+      data.message ||
+      "Profile submitted successfully. Admin approval is required."
     );
 
   } catch (error) {
@@ -872,16 +1017,19 @@ async function saveWorkerProfile() {
     alert(error.message);
 
   }
-
 }
 
+
+// =========================
+// WORKER GPS
+// =========================
 
 function updateWorkerGPS() {
 
   if (!navigator.geolocation) {
 
     alert(
-      "GPS is not supported."
+      "GPS is not supported on this device."
     );
 
     return;
@@ -898,7 +1046,7 @@ function updateWorkerGPS() {
         position.coords.longitude;
 
       alert(
-        "GPS location updated. Save your profile again to store it."
+        "GPS location updated. Submit your profile now."
       );
 
     },
@@ -913,17 +1061,17 @@ function updateWorkerGPS() {
 
     {
       enableHighAccuracy: true,
-      timeout: 10000
+      timeout: 10000,
+      maximumAge: 60000
     }
 
   );
-
 }
 
 
-/* =========================
-   LOGOUT
-========================= */
+// =========================
+// LOGOUT
+// =========================
 
 function logout() {
 
@@ -938,54 +1086,11 @@ function logout() {
 }
 
 
-/* =========================
-   MAIN RENDER
-========================= */
+// =========================
+// MAIN CUSTOMER SCREEN
+// =========================
 
-function render() {
-
-  const session =
-    document.getElementById(
-      "session"
-    );
-
-  if (!user) {
-
-    session.innerHTML = "";
-
-    showAuth();
-
-    return;
-  }
-
-
-  session.innerHTML = `
-
-    <div class="session-user">
-
-      <span>
-        ${escapeHTML(user.phone)}
-      </span>
-
-      <button
-        class="logout-btn"
-        onclick="logout()"
-      >
-        Logout
-      </button>
-
-    </div>
-
-  `;
-
-
-  if (user.role === "worker") {
-
-    workerDashboard();
-
-    return;
-  }
-
+function customerDashboard() {
 
   document.getElementById("app").innerHTML = `
 
@@ -1001,7 +1106,7 @@ function render() {
         </span>
 
         <h2>
-          Find a ${category}
+          Find a ${escapeHTML(category)}
         </h2>
 
         <p>
@@ -1018,20 +1123,17 @@ function render() {
           item => `
 
             <button
-              class="
-                service-chip
-                ${
-                  item === category
-                    ? "active"
-                    : ""
-                }
-              "
+              class="service-chip ${
+                item === category
+                  ? "active"
+                  : ""
+              }"
               onclick="
                 category='${escapeAttribute(item)}';
                 render();
               "
             >
-              ${item}
+              ${escapeHTML(item)}
             </button>
 
           `
@@ -1043,6 +1145,7 @@ function render() {
       <div class="location-bar">
 
         <div>
+
           <strong>
             📍 Location
           </strong>
@@ -1054,6 +1157,7 @@ function render() {
                 : "GPS not selected"
             }
           </small>
+
         </div>
 
         <button
@@ -1101,17 +1205,84 @@ function render() {
 
   `;
 
-
   findWorkers();
 
   loadBookings();
-
 }
 
 
-/* =========================
-   HELPERS
-========================= */
+// =========================
+// MAIN RENDER
+// =========================
+
+function render() {
+
+  const session =
+    document.getElementById("session");
+
+  if (!user) {
+
+    if (session) {
+      session.innerHTML = "";
+    }
+
+    showAuth();
+
+    return;
+  }
+
+
+  if (!user.role) {
+
+    if (session) {
+      session.innerHTML = "";
+    }
+
+    showRoleSelection();
+
+    return;
+  }
+
+
+  if (session) {
+
+    session.innerHTML = `
+
+      <div class="session-user">
+
+        <span>
+          ${escapeHTML(user.phone)}
+        </span>
+
+        <button
+          class="logout-btn"
+          onclick="logout()"
+        >
+          Logout
+        </button>
+
+      </div>
+
+    `;
+
+  }
+
+
+  if (user.role === "worker") {
+
+    workerDashboard();
+
+    return;
+  }
+
+
+  customerDashboard();
+}
+
+
+// =========================
+// HELPERS
+// =========================
 
 function getInitials(name) {
 
@@ -1127,7 +1298,6 @@ function getInitials(name) {
         word.charAt(0).toUpperCase()
     )
     .join("");
-
 }
 
 
@@ -1140,7 +1310,6 @@ function formatStatus(status) {
       letter =>
         letter.toUpperCase()
     );
-
 }
 
 
@@ -1152,7 +1321,6 @@ function escapeHTML(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
-
 }
 
 
@@ -1162,20 +1330,11 @@ function escapeAttribute(value) {
     .replaceAll("\\", "\\\\")
     .replaceAll("'", "\\'")
     .replaceAll('"', "&quot;");
-
 }
 
 
-/* =========================
-   START
-========================= */
+// =========================
+// START
+// =========================
 
-if (user) {
-
-  render();
-
-} else {
-
-  showAuth();
-
-}
+render();
